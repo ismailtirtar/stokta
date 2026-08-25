@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stokta Gizlilik Politikası ve Hesap Silme</title>
+  <meta name="description" content="Stokta uygulamasının gizlilik politikası ve hesap silme bilgileri.">
+  <style>
+    :root { color-scheme: light; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1b2721; background: #f4f5f1; }
+    * { box-sizing: border-box; }
+    body { margin: 0; line-height: 1.65; }
+    header { padding: 48px 20px 40px; color: #fff; background: #172820; }
+    header div, main { width: min(760px, 100%); margin: 0 auto; }
+    .brand { display: flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 800; }
+    .mark { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 13px 13px 13px 4px; color: #172820; background: #f3a952; font-size: 23px; font-weight: 900; }
+    h1 { margin: 28px 0 8px; font-size: clamp(30px, 7vw, 46px); line-height: 1.12; }
+    header p { margin: 0; color: #aabbb2; }
+    main { padding: 34px 20px 60px; }
+    section { margin: 0 0 16px; padding: 24px; border: 1px solid #e0e4df; border-radius: 16px; background: #fff; }
+    h2 { margin: 0 0 10px; font-size: 20px; }
+    h3 { margin: 20px 0 6px; font-size: 15px; }
+    p, li { color: #5f6b64; }
+    a { color: #1f7353; font-weight: 700; }
+    .warning { border-color: #efd5cf; background: #fff7f5; }
+    footer { padding: 24px 20px; text-align: center; color: #7f8b84; background: #e9ece7; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="brand"><span class="mark">S</span> Stokta</div>
+      <h1>Gizlilik Politikası</h1>
+      <p>Yürürlük tarihi: 25 Ağustos 2026</p>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Veri sorumlusu</h2>
+      <p>Stokta uygulaması İsmail Tırtar tarafından işletilir. Hizmet, kiracı işletmelerin ortak stok verilerini birbirinden ayrılmış çalışma alanlarında yönetmesini sağlar.</p>
+      <p>Gizlilik soruları için: <a href="mailto:tirtarismail@gmail.com">tirtarismail@gmail.com</a></p>
+    </section>
+    <section>
+      <h2>İşlenen veriler</h2>
+      <p>İşletme adı; kullanıcı adı, ad ve soyad, hesap rolü ve oturum bilgileri; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kayıt kötüye kullanımını sınırlandırmak için ağ adresinin geri döndürülemeyen özeti kısa süreyle tutulur. Gerçek e-posta adresi istenmez. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</p>
+    </section>
+    <section>
+      <h2>Kullanım amacı ve hizmet sağlayıcı</h2>
+      <p>Veriler yalnızca kimlik doğrulama, işletme hesabı açma, ortak stok takibi, kiralama yönetimi, yetkilendirme, güvenlik ve işlem geçmişi amaçlarıyla kullanılır. Reklam, satış, davranışsal takip veya analiz yapılmaz.</p>
+      <p>Bulut veritabanı ve kimlik doğrulama altyapısı için Supabase hizmet sağlayıcı olarak kullanılır. Uygulama verileri Frankfurt bölgesindeki sunucularda tutulur.</p>
+    </section>
+    <section>
+      <h2>Güvenlik ve saklama</h2>
+      <p>Aktarım sırasında HTTPS/TLS kullanılır. Veritabanında satır düzeyi güvenlik, rol tabanlı yetkilendirme ve sunucu tarafında atomik stok işlemleri uygulanır. Hizmet rolü anahtarı mobil uygulamada bulunmaz.</p>
+      <p>Veriler hesap veya işletme çalışma alanı silinene kadar saklanır. İşletme yöneticisinin silme işlemi yalnızca kendi işletmesinin ürün, hareket ve kullanıcı kayıtlarını kaldırır. Yasal bir saklama zorunluluğu doğarsa yalnızca zorunlu süre boyunca tutulur.</p>
+    </section>
+    <section id="hesap-silme" class="warning">
+      <h2>Hesap ve veri silme</h2>
+      <h3>Uygulama içinden</h3>
+      <ol>
+        <li>Stokta'ya giriş yapın.</li>
+        <li>Sağ üstteki profil simgesine dokunun.</li>
+        <li>“Hesabımı sil” seçeneğini açın.</li>
+        <li>İstenen doğrulama metnini girip kalıcı silmeyi onaylayın.</li>
+      </ol>
+      <p>Çalışan hesabı silindiğinde ad, kullanıcı adı ve giriş hesabı kaldırılır. Ortak stok kayıtlarının bütünlüğü için geçmiş hareketler yalnızca “Silinmiş kullanıcı” adıyla anonim olarak kalır.</p>
+      <p>Yönetici hesabı silindiğinde yalnızca o işletmenin ürünleri, stok hareketleri ve çalışan hesapları kalıcı olarak silinir; diğer işletmeler etkilenmez.</p>
+      <h3>Uygulamaya erişemiyorsanız</h3>
+      <p><a href="mailto:tirtarismail@gmail.com?subject=Stokta%20hesap%20silme%20talebi">Destek e-postasına</a> “Stokta hesap silme talebi” konusuyla kullanıcı adınızı gönderin. Kimlik doğrulamasından sonra talep en geç 30 gün içinde tamamlanır. Şifrenizi e-postayla göndermeyin.</p>
+    </section>
+    <section>
+      <h2>Haklarınız ve değişiklikler</h2>
+      <p>Verilerinize erişme, düzeltme veya silme hakkında destek adresinden bilgi isteyebilirsiniz. Bu politika değişirse yürürlük tarihi güncellenir ve önemli değişiklikler uygulama veya mağaza sayfası üzerinden duyurulur.</p>
+    </section>
+  </main>
+  <footer>© 2026 Stokta · İsmail Tırtar</footer>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500">
+  <rect width="1024" height="500" fill="#172820"/>
+  <circle cx="878" cy="94" r="178" fill="#203a2f"/>
+  <circle cx="862" cy="438" r="230" fill="#1c3228"/>
+  <g transform="translate(78 95)">
+    <rect width="116" height="116" rx="31" fill="#f3a952"/>
+    <path d="M27 78c9 17 25 26 45 26 24 0 39-12 39-30 0-16-10-25-32-31l-12-3c-11-3-15-6-15-11 0-6 6-10 15-10 11 0 20 5 25 14l16-11C99 8 85 0 67 0 45 0 30 12 30 30c0 15 10 24 31 29l12 3c12 3 16 7 16 13 0 7-6 11-17 11-13 0-23-6-29-18z" transform="translate(5 6) scale(.92)" fill="#172820"/>
+    <text x="0" y="180" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="58" font-weight="800">Stokta</text>
+    <text x="0" y="222" fill="#b8c8c0" font-family="DejaVu Sans, Arial, sans-serif" font-size="23">Ortak stok, tek gerçek.</text>
+  </g>
+  <g transform="translate(580 77)">
+    <rect width="350" height="346" rx="28" fill="#f7f7f3"/>
+    <text x="30" y="54" fill="#7a8580" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" font-weight="700">ANLIK STOK</text>
+    <g transform="translate(30 78)">
+      <rect width="290" height="68" rx="14" fill="#ffffff" stroke="#e2e5e1"/>
+      <rect x="17" y="15" width="38" height="38" rx="11" fill="#e7f1ec"/>
+      <text x="31" y="41" fill="#337559" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="800">K</text>
+      <text x="68" y="30" fill="#1b2721" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700">Koli Bandı</text>
+      <text x="68" y="49" fill="#8b9490" font-family="DejaVu Sans, Arial, sans-serif" font-size="11">AMB-045 · 128 adet</text>
+      <rect x="228" y="20" width="44" height="26" rx="13" fill="#e6f2eb"/>
+      <circle cx="250" cy="33" r="5" fill="#3f936d"/>
+    </g>
+    <g transform="translate(30 158)">
+      <rect width="290" height="68" rx="14" fill="#ffffff" stroke="#e2e5e1"/>
+      <rect x="17" y="15" width="38" height="38" rx="11" fill="#fff0db"/>
+      <text x="31" y="41" fill="#a56620" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="800">E</text>
+      <text x="68" y="30" fill="#1b2721" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700">Etiket Rulosu</text>
+      <text x="68" y="49" fill="#8b9490" font-family="DejaVu Sans, Arial, sans-serif" font-size="11">ETK-100 · 6 adet</text>
+      <rect x="220" y="20" width="52" height="26" rx="13" fill="#fff0db"/>
+      <text x="229" y="37" fill="#a56620" font-family="DejaVu Sans, Arial, sans-serif" font-size="9" font-weight="700">AZALDI</text>
+    </g>
+    <g transform="translate(30 252)">
+      <rect width="138" height="52" rx="12" fill="#edf6f1"/>
+      <text x="31" y="32" fill="#2b7354" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" font-weight="700">+ Stok ekle</text>
+      <rect x="152" width="138" height="52" rx="12" fill="#fff1dd"/>
+      <text x="174" y="32" fill="#9b6323" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" font-weight="700">− Stoktan düş</text>
+    </g>
+  </g>
+</svg>

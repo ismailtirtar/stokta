@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Stokta",
+    "slug": "dukkan-stok-takip",
+    "owner": "homra",
+    "version": "1.3.0",
+    "icon": "./assets/icon.png",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#172820",
+    "primaryColor": "#172820",
+    "scheme": "stokta",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.ismailtirtar.stokta",
+      "versionCode": 8,
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#172820"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.ismailtirtar.stokta",
+      "supportsTablet": false,
+      "icon": "./assets/icon.png",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6d9c0250-c796-4458-9fdb-99e50b690c3b"
+      }
+    }
+  }
+}

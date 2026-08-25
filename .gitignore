@@ -1,0 +1,10 @@
+node_modules/
+.expo/
+dist/
+dist-play/
+dist-*/
+.env
+*.jks
+*.keystore
+android/
+ios/
