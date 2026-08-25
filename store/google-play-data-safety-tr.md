@@ -1,6 +1,6 @@
 # Stokta — Google Play Veri Güvenliği taslağı
 
-Bu belge, mevcut 1.3.0 kaynak koduna göre Play Console formunu doldurmak için hazırlanmıştır. Son gönderimde Play Console sorularının güncel metniyle karşılaştırılmalıdır.
+Bu belge, mevcut 1.3.1 kaynak koduna göre Play Console formunu doldurmak için hazırlanmıştır. Son gönderimde Play Console sorularının güncel metniyle karşılaştırılmalıdır.
 
 ## Genel yanıtlar
 

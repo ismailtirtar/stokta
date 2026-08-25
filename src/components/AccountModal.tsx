@@ -97,7 +97,7 @@ export default function AccountModal({
                 <Text style={styles.dangerChevron}>›</Text>
               </Pressable> : null}
 
-              <Text style={styles.version}>Stokta · Sürüm 1.3.0</Text>
+              <Text style={styles.version}>Stokta · Sürüm 1.3.1</Text>
             </View>
           ) : null}
 

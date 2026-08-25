@@ -1,4 +1,4 @@
-# Stokta 1.3.0 — Google Play yayın kontrol listesi
+# Stokta 1.3.1 — Google Play yayın kontrol listesi
 
 ## Hazır olanlar
 
