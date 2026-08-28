@@ -137,7 +137,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
 
   function requireWritable() {
     if (canWrite) return true;
-    Alert.alert("İşletme hesabı işlem yapmaya kapalı", "Kiralama durumunu yenilemek için Stokta yöneticisiyle iletişime geçin.");
+    Alert.alert("İşletme hesabı işlem yapmaya kapalı", "Kiralama durumunu yenilemek için Stokdaş yöneticisiyle iletişime geçin.");
     return false;
   }
 

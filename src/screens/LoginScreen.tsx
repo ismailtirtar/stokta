@@ -110,11 +110,11 @@ export default function LoginScreen() {
         >
           <View style={styles.brand}>
             <View style={styles.logo}><Text style={styles.logoText}>S</Text></View>
-            <Text style={styles.brandName}>Stokta</Text>
+            <Text style={styles.brandName}>Stokdaş</Text>
           </View>
           <View style={styles.heading}>
             <Text style={styles.kicker}>{isRegister ? "YENİ İŞLETME" : "BULUT STOK TAKİBİ"}</Text>
-            <Text style={styles.title}>{isRegister ? "İşletmeni Stokta'ya taşı." : "Ekibinle aynı stokta buluş."}</Text>
+            <Text style={styles.title}>{isRegister ? "İşletmeni Stokdaş'a taşı." : "Ekibinle aynı stokta buluş."}</Text>
             <Text style={styles.subtitle}>
               {isRegister
                 ? "İşletme hesabını oluştur, ürünlerini ekle ve çalışma arkadaşlarınla ortak kullanmaya başla."

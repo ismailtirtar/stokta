@@ -1,8 +1,8 @@
-# Stokta — Google Play mağaza metni
+# Stokdaş — Google Play mağaza metni
 
 ## Uygulama ayrıntıları
 
-- Uygulama adı: `Stokta`
+- Uygulama adı: `Stokdaş`
 - Varsayılan dil: `Türkçe (tr-TR)`
 - Uygulama veya oyun: `Uygulama`
 - Ücretli veya ücretsiz: `Ücretsiz`
@@ -17,7 +17,7 @@ Karakter sayısı: 71 / 80.
 
 ## Tam açıklama
 
-> Stokta, aynı iş yerindeki çalışanların ortak stok listesini güvenli ve anlık biçimde yönetmesini sağlar.
+> Stokdaş, aynı iş yerindeki çalışanların ortak stok listesini güvenli ve anlık biçimde yönetmesini sağlar.
 >
 > Ürünleri, mevcut miktarları ve kritik stok seviyelerini tek ekranda görün. Stok girişini veya çıkışını birkaç dokunuşla kaydedin; ekipte yapılan değişiklikler diğer kullanıcıların ekranına otomatik olarak yansısın.
 >
@@ -35,7 +35,7 @@ Karakter sayısı: 71 / 80.
 >
 > Yeni müşteriler uygulama içinden işletmelerini ve ilk yönetici hesaplarını oluşturabilir. Yönetici ürünleri ve çalışan hesaplarını ekler. Çalışanlar kendilerine verilen kullanıcı adı ve şifreyle giriş yaparak aynı stok üzerinde çalışır. Stok hareketleri eş zamanlı güncellenir ve negatif stok engellenir.
 >
-> Stokta; küçük işletmeler, depolar, atölyeler ve ortak envanter takibi yapmak isteyen ekipler için tasarlanmıştır.
+> Stokdaş; küçük işletmeler, depolar, atölyeler ve ortak envanter takibi yapmak isteyen ekipler için tasarlanmıştır.
 
 ## İnceleme erişimi
 

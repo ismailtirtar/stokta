@@ -43,8 +43,11 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json() as { confirmation?: unknown };
     const confirmation = typeof body.confirmation === "string" ? body.confirmation.trim() : "";
-    const expectedConfirmation = caller.role === "admin" ? "STOKTA" : caller.username;
-    if (confirmation !== expectedConfirmation) {
+    const expectedConfirmation = caller.role === "admin" ? "STOKDAŞ" : caller.username;
+    const isValidConfirmation = caller.role === "admin"
+      ? confirmation === expectedConfirmation || confirmation === "STOKTA"
+      : confirmation === expectedConfirmation;
+    if (!isValidConfirmation) {
       return json(400, { error: `Onay alanına ${expectedConfirmation} yazılmalı` });
     }
 

@@ -71,7 +71,7 @@ Deno.serve(async (req: Request) => {
       .eq("id", userData.user.id)
       .single();
     if (callerError || !caller?.is_platform_operator) {
-      return json(403, { error: "Bu işlem yalnızca Stokta platform yöneticisine açıktır" });
+      return json(403, { error: "Bu işlem yalnızca Stokdaş platform yöneticisine açıktır" });
     }
 
     if (req.method === "GET") {

@@ -1,4 +1,4 @@
-# Stokta 1.3.1 — Google Play yayın kontrol listesi
+# Stokdaş 1.3.2 — Google Play yayın kontrol listesi
 
 ## Hazır olanlar
 
@@ -37,4 +37,4 @@
 - Uygulama erişimi kısıtlı mı? `Evet — giriş bilgisi gerekli`
 - Veri silme: `Uygulama içinde ve web kaynağı üzerinden mevcut`
 
-31 Ağustos 2026'dan itibaren yeni uygulama ve güncellemeler Android 16 / API 36'yı hedeflemelidir. Stokta SDK 54 ile bunu karşılar. Kaynak: [Google Play hedef API şartı](https://support.google.com/googleplay/android-developer/answer/11926878?hl=en).
+31 Ağustos 2026'dan itibaren yeni uygulama ve güncellemeler Android 16 / API 36'yı hedeflemelidir. Stokdaş, Expo SDK 54 ile bunu karşılar. Kaynak: [Google Play hedef API şartı](https://support.google.com/googleplay/android-developer/answer/11926878?hl=en).

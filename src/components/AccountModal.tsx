@@ -51,7 +51,7 @@ export default function AccountModal({
   }, [visible]);
 
   const isAdmin = role === "admin";
-  const expectedConfirmation = isAdmin ? "STOKTA" : username;
+  const expectedConfirmation = isAdmin ? "STOKDAŞ" : username;
   const canDelete = confirmation.trim() === expectedConfirmation && !saving;
 
   return (
@@ -97,7 +97,7 @@ export default function AccountModal({
                 <Text style={styles.dangerChevron}>›</Text>
               </Pressable> : null}
 
-              <Text style={styles.version}>Stokta · Sürüm 1.3.1</Text>
+              <Text style={styles.version}>Stokdaş · Sürüm 1.3.2</Text>
             </View>
           ) : null}
 
@@ -139,7 +139,7 @@ function PrivacyPolicy() {
   return (
     <ScrollView style={styles.policy} showsVerticalScrollIndicator={false}>
       <Text style={styles.policyDate}>Yürürlük tarihi: 25 Ağustos 2026</Text>
-      <PolicySection title="Veri sorumlusu">Stokta uygulaması İsmail Tırtar tarafından işletilir. Hizmet, kiracı işletmelerin stok ve kullanıcı verilerini birbirinden ayrılmış çalışma alanlarında yönetmesini sağlar.</PolicySection>
+      <PolicySection title="Veri sorumlusu">Stokdaş uygulaması İsmail Tırtar tarafından işletilir. Hizmet, kiracı işletmelerin stok ve kullanıcı verilerini birbirinden ayrılmış çalışma alanlarında yönetmesini sağlar.</PolicySection>
       <PolicySection title="İşlenen veriler">İşletme adı; kullanıcı adı, ad ve soyad, hesap rolü, oturum bilgileri; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kayıt kötüye kullanımını sınırlandırmak için ağ adresinin geri döndürülemeyen özeti kısa süreyle tutulur. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</PolicySection>
       <PolicySection title="Amaç ve paylaşım">Veriler yalnızca kimlik doğrulama, işletme hesabı açma, ortak stok takibi, kiralama yönetimi, yetkilendirme, güvenlik ve işlem geçmişi amaçlarıyla kullanılır. Reklam veya kullanıcı takibi yapılmaz. Altyapı sağlayıcısı olarak Supabase kullanılır; veriler Frankfurt bölgesindeki sunucularda tutulur.</PolicySection>
       <PolicySection title="Saklama ve silme">Veriler hesap veya işletme çalışma alanı silinene kadar saklanır. Çalışan hesabı silindiğinde profil bilgileri kaldırılır ve eski hareketler anonimleştirilir. İşletme yöneticisi silme işlemini başlattığında yalnızca kendi işletmesinin verileri ve hesapları kalıcı olarak kaldırılır.</PolicySection>

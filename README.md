@@ -1,6 +1,6 @@
-# Stokta — Android
+# Stokdaş — Android
 
-Birden fazla işletmenin birbirinden tamamen ayrılmış bulut stoklarıyla çalışabildiği, kiralanabilir Expo/React Native uygulamasıdır. Bu paket, Frankfurt bölgesindeki `Stokta` Supabase projesine bağlıdır.
+Birden fazla işletmenin birbirinden tamamen ayrılmış bulut stoklarıyla çalışabildiği, kiralanabilir Expo/React Native uygulamasıdır. Bu paket, Frankfurt bölgesindeki Stokdaş Supabase altyapısına bağlıdır.
 
 ## Hazır özellikler
 

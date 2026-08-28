@@ -1,4 +1,4 @@
--- Stokta: Android-first shared inventory backend for Supabase.
+-- Stokdaş: Android-first shared inventory backend for Supabase.
 -- All client writes go through RPC functions; tables are read-only to clients.
 
 begin;
