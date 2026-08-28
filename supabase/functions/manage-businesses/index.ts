@@ -1,11 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.112.3";
-
-const jsonHeaders = {
-  "Content-Type": "application/json",
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import {
+  bearerToken,
+  corsJsonHeaders,
+  json,
+  sessionIdFromAccessToken,
+} from "../_shared/security.ts";
 
 type Organization = {
   id: string;
@@ -19,39 +19,16 @@ type Organization = {
   created_at: string;
 };
 
-function json(status: number, body: Record<string, unknown>) {
-  return new Response(JSON.stringify(body), { status, headers: jsonHeaders });
-}
-
-function normalizeUsername(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase();
-  return /^[a-z0-9][a-z0-9._-]{2,31}$/.test(normalized) ? normalized : null;
-}
-
-function normalizeSlug(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase();
-  return /^[a-z0-9][a-z0-9-]{2,47}$/.test(normalized) ? normalized : null;
-}
-
-function isStrongPassword(value: string) {
-  return value.length >= 8 && value.length <= 72
-    && /[a-z]/.test(value) && /[A-Z]/.test(value)
-    && /[0-9]/.test(value) && /[^A-Za-z0-9]/.test(value);
-}
-
 function boundedInteger(value: unknown, fallback: number, min: number, max: number) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: jsonHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsJsonHeaders });
 
   try {
-    const authorization = req.headers.get("Authorization");
-    const token = authorization?.replace(/^Bearer\s+/i, "");
+    const token = bearerToken(req);
     if (!token) return json(401, { error: "Oturum gerekli" });
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -64,13 +41,21 @@ Deno.serve(async (req: Request) => {
 
     const { data: userData, error: userError } = await admin.auth.getUser(token);
     if (userError || !userData.user) return json(401, { error: "Geçersiz oturum" });
+    const sessionId = sessionIdFromAccessToken(token);
+    if (!sessionId) return json(401, { error: "Geçersiz oturum" });
+    const { data: liveSession, error: liveSessionError } = await admin.rpc("service_has_live_session", {
+      p_user_id: userData.user.id,
+      p_session_id: sessionId,
+    });
+    if (liveSessionError || !liveSession) return json(401, { error: "Oturum sona erdi" });
 
     const { data: caller, error: callerError } = await admin
       .from("profiles")
-      .select("id, is_platform_operator")
+      .select("id,is_platform_operator,must_change_password")
       .eq("id", userData.user.id)
-      .single();
-    if (callerError || !caller?.is_platform_operator) {
+      .eq("is_active", true)
+      .maybeSingle();
+    if (callerError || !caller?.is_platform_operator || caller.must_change_password) {
       return json(403, { error: "Bu işlem yalnızca Stokdaş platform yöneticisine açıktır" });
     }
 
@@ -82,7 +67,7 @@ Deno.serve(async (req: Request) => {
       if (organizationError) throw organizationError;
 
       const [{ data: profiles, error: profileError }, { data: products, error: productError }] = await Promise.all([
-        admin.from("profiles").select("organization_id"),
+        admin.from("profiles").select("organization_id").eq("is_active", true),
         admin.from("products").select("organization_id").eq("active", true),
       ]);
       if (profileError) throw profileError;
@@ -144,85 +129,25 @@ Deno.serve(async (req: Request) => {
         .select("id,name,slug,subscription_status,trial_ends_at,current_period_end,max_members,max_products")
         .single();
       if (updateError) throw updateError;
+      await admin.rpc("service_record_security_event", {
+        p_event_type: "organization.subscription_updated",
+        p_organization_id: organizationId,
+        p_actor_id: caller.id,
+        p_metadata: { status, maxMembers, maxProducts, periodDays },
+      });
       return json(200, { organization });
     }
 
-    if (action !== "create") return json(400, { error: "Geçersiz işlem" });
-
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    const slug = normalizeSlug(body.slug);
-    const username = normalizeUsername(body.username);
-    const displayName = typeof body.displayName === "string" ? body.displayName.trim() : "";
-    const password = typeof body.password === "string" ? body.password : "";
-    const trialDays = boundedInteger(body.trialDays, 14, 1, 365);
-    const maxMembers = boundedInteger(body.maxMembers, 5, 1, 10000);
-    const maxProducts = boundedInteger(body.maxProducts, 1000, 1, 1000000);
-
-    if (name.length < 2 || name.length > 100) return json(400, { error: "İşletme adı 2-100 karakter olmalı" });
-    if (!slug) return json(400, { error: "İşletme kodu 3-48 karakter olmalı; a-z, 0-9 ve tire kullanılabilir" });
-    if (!username) return json(400, { error: "Yönetici kullanıcı adı geçersiz" });
-    if (displayName.length < 1 || displayName.length > 80) return json(400, { error: "Yönetici adı 1-80 karakter olmalı" });
-    if (!isStrongPassword(password)) {
-      return json(400, { error: "Şifre 8-72 karakter olmalı; büyük harf, küçük harf, rakam ve sembol içermeli" });
-    }
-
-    const { data: organization, error: organizationError } = await admin
-      .from("organizations")
-      .insert({
-        name,
-        slug,
-        subscription_status: "trial",
-        trial_ends_at: new Date(Date.now() + trialDays * 86400000).toISOString(),
-        max_members: maxMembers,
-        max_products: maxProducts,
-        created_by: caller.id,
-      })
-      .select("id,name,slug,subscription_status,trial_ends_at,max_members,max_products")
-      .single();
-    if (organizationError || !organization) {
-      return json(organizationError?.code === "23505" ? 409 : 500, {
-        error: organizationError?.code === "23505" ? "Bu işletme kodu zaten kullanılıyor" : "İşletme oluşturulamadı",
+    if (action === "create") {
+      return json(410, {
+        error: "Yeni işletmeler yalnız e-posta doğrulamalı kayıt ekranından oluşturulabilir",
+        code: "BUSINESS_CREATION_SELF_SERVICE_ONLY",
       });
     }
-
-    const email = `${username}@stokta.invalid`;
-    const { data: authData, error: authError } = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      app_metadata: {
-        provisioned_by_platform: true,
-        organization_id: organization.id,
-        username,
-        display_name: displayName,
-      },
-      user_metadata: { display_name: displayName },
-    });
-    if (authError || !authData.user) {
-      await admin.from("organizations").delete().eq("id", organization.id);
-      return json(400, { error: authError?.message ?? "Yönetici giriş hesabı oluşturulamadı" });
-    }
-
-    const { error: profileError } = await admin.from("profiles").insert({
-      id: authData.user.id,
-      organization_id: organization.id,
-      username,
-      display_name: displayName,
-      role: "admin",
-      created_by: null,
-      is_platform_operator: false,
-    });
-    if (profileError) {
-      await admin.auth.admin.deleteUser(authData.user.id);
-      await admin.from("organizations").delete().eq("id", organization.id);
-      return json(profileError.code === "23505" ? 409 : 500, {
-        error: profileError.code === "23505" ? "Bu kullanıcı adı zaten kullanılıyor" : "Yönetici profili oluşturulamadı",
-      });
-    }
-
-    return json(201, { organization, admin: { username, displayName } });
+    return json(400, { error: "Geçersiz işlem" });
   } catch (error) {
     console.error("Business management failed", error);
-    return json(500, { error: error instanceof Error ? error.message : "Beklenmeyen hata" });
+    return json(500, { error: "İşletme yönetimi işlemi tamamlanamadı" });
   }
 });
+

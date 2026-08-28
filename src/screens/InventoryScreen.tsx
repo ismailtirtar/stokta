@@ -224,10 +224,10 @@ export default function InventoryScreen({ session }: { session: Session }) {
     ]);
   }
 
-  async function deleteAccount(confirmation: string) {
+  async function deleteAccount(confirmation: string, currentPassword: string) {
     setSaving(true);
     const { error: deleteError } = await supabase.functions.invoke("delete-account", {
-      body: { confirmation },
+      body: { confirmation, currentPassword },
     });
     setSaving(false);
     if (deleteError) {

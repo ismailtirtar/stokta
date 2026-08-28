@@ -24,7 +24,7 @@ type Props = {
   saving: boolean;
   onClose: () => void;
   onSignOut: () => void;
-  onDelete: (confirmation: string) => void;
+  onDelete: (confirmation: string, currentPassword: string) => void;
 };
 
 export default function AccountModal({
@@ -42,17 +42,22 @@ export default function AccountModal({
 }: Props) {
   const [page, setPage] = useState<"account" | "privacy" | "delete">("account");
   const [confirmation, setConfirmation] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
 
   useEffect(() => {
     if (visible) {
       setPage("account");
       setConfirmation("");
+      setCurrentPassword("");
     }
   }, [visible]);
 
   const isAdmin = role === "admin";
   const expectedConfirmation = isAdmin ? "STOKDAŞ" : username;
-  const canDelete = confirmation.trim() === expectedConfirmation && !saving;
+  const canDelete = confirmation.trim() === expectedConfirmation
+    && currentPassword.length > 0
+    && currentPassword.length <= 72
+    && !saving;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -62,7 +67,7 @@ export default function AccountModal({
           <View style={styles.header}>
             <Pressable
               style={[styles.headerButton, page === "account" && styles.headerButtonHidden]}
-              onPress={() => { setPage("account"); setConfirmation(""); }}
+              onPress={() => { setPage("account"); setConfirmation(""); setCurrentPassword(""); }}
               disabled={page === "account" || saving}
             >
               <Text style={styles.headerButtonText}>‹</Text>
@@ -124,7 +129,20 @@ export default function AccountModal({
                 autoCorrect={false}
                 editable={!saving}
               />
-              <Pressable style={[styles.deleteButton, !canDelete && styles.disabled]} onPress={() => onDelete(confirmation.trim())} disabled={!canDelete}>
+              <Text style={styles.confirmLabel}>Mevcut şifreniz</Text>
+              <TextInput
+                style={styles.confirmInput}
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                placeholder="Mevcut şifrenizi girin"
+                placeholderTextColor="#9ca39f"
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                textContentType="password"
+                editable={!saving}
+              />
+              <Pressable style={[styles.deleteButton, !canDelete && styles.disabled]} onPress={() => onDelete(confirmation.trim(), currentPassword)} disabled={!canDelete}>
                 {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.deleteButtonText}>{isAdmin ? "Her şeyi kalıcı olarak sil" : "Hesabımı kalıcı olarak sil"}</Text>}
               </Pressable>
             </ScrollView>
