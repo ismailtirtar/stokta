@@ -8,6 +8,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { normalizeUsername, supabase } from "../lib/supabase";
 import AccountModal from "../components/AccountModal";
+import ForcedPasswordChange from "../components/ForcedPasswordChange";
 import PlatformModal from "../components/PlatformModal";
 import type { Movement, Product, ProductDraft, ProfileRole } from "../types";
 
@@ -26,6 +27,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
   const [isPlatformOperator, setIsPlatformOperator] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [search, setSearch] = useState("");
   const [onlyLow, setOnlyLow] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -44,6 +46,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
   const [note, setNote] = useState("");
   const [coworkerName, setCoworkerName] = useState("");
   const [coworkerUsername, setCoworkerUsername] = useState("");
+  const [coworkerEmail, setCoworkerEmail] = useState("");
   const [coworkerPassword, setCoworkerPassword] = useState("");
   const [coworkerPasswordAgain, setCoworkerPasswordAgain] = useState("");
   const [saving, setSaving] = useState(false);
@@ -52,7 +55,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
     if (!quiet) setLoading(true);
     const profileResult = await supabase
       .from("profiles")
-      .select("display_name,username,role,organization_id,is_platform_operator,organizations(name,subscription_status,trial_ends_at,current_period_end)")
+      .select("display_name,username,role,organization_id,is_platform_operator,must_change_password,organizations(name,subscription_status,trial_ends_at,current_period_end)")
       .eq("id", session.user.id)
       .maybeSingle();
 
@@ -61,6 +64,14 @@ export default function InventoryScreen({ session }: { session: Session }) {
       setLoading(false); setRefreshing(false);
       return;
     }
+
+    if (profileResult.data.must_change_password) {
+      setMustChangePassword(true);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+    setMustChangePassword(false);
 
     const profileOrganization = Array.isArray(profileResult.data.organizations)
       ? profileResult.data.organizations[0]
@@ -191,6 +202,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
     if (!isAdmin || !requireWritable()) return;
     setCoworkerName("");
     setCoworkerUsername("");
+    setCoworkerEmail("");
     setCoworkerPassword("");
     setCoworkerPasswordAgain("");
     setCoworkerModal(true);
@@ -199,14 +211,16 @@ export default function InventoryScreen({ session }: { session: Session }) {
   async function saveCoworker() {
     if (!isAdmin) return;
     const normalizedUsername = normalizeUsername(coworkerUsername);
+    const normalizedEmail = coworkerEmail.trim().toLowerCase();
     if (!coworkerName.trim()) { Alert.alert("Eksik bilgi", "Çalışanın adını girin."); return; }
     if (normalizedUsername.length < 3) { Alert.alert("Hatalı kullanıcı adı", "Kullanıcı adı en az 3 karakter olmalı."); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) { Alert.alert("Hatalı e-posta", "Çalışanın doğrulama e-postasını girin."); return; }
     if (!isStrongPassword(coworkerPassword)) { Alert.alert("Hatalı şifre", "Şifre 8-72 karakter olmalı; büyük harf, küçük harf, rakam ve sembol içermeli."); return; }
     if (coworkerPassword !== coworkerPasswordAgain) { Alert.alert("Şifreler eşleşmiyor", "İki alana aynı şifreyi girin."); return; }
 
     setSaving(true);
     const { error: createError } = await supabase.functions.invoke("create-coworker", {
-      body: { username: normalizedUsername, displayName: coworkerName.trim(), password: coworkerPassword },
+      body: { username: normalizedUsername, displayName: coworkerName.trim(), recoveryEmail: normalizedEmail, password: coworkerPassword },
     });
     setSaving(false);
     if (createError) {
@@ -214,7 +228,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
       return;
     }
     setCoworkerModal(false);
-    Alert.alert("Hesap hazır", `${coworkerName.trim()} artık “${normalizedUsername}” kullanıcı adıyla giriş yapabilir.`);
+    Alert.alert("Doğrulama gönderildi", `${coworkerName.trim()} için doğrulama kodu ${normalizedEmail} adresine gönderildi. Çalışan “${normalizedUsername}” kullanıcı adıyla giriş yapıp kodu tamamlayabilir.`);
   }
 
   async function signOut() {
@@ -239,6 +253,8 @@ export default function InventoryScreen({ session }: { session: Session }) {
     await supabase.auth.signOut({ scope: "local" });
     Alert.alert("Silme tamamlandı", isAdmin ? "Çalışma alanı ve tüm hesaplar kalıcı olarak silindi." : "Hesabınız ve kişisel profil bilgileriniz silindi.");
   }
+
+  if (mustChangePassword) return <ForcedPasswordChange />;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -274,7 +290,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
       {isAdmin && canWrite ? <Pressable style={styles.fab} onPress={openCreate}><Text style={styles.fabText}>＋</Text></Pressable> : null}
       {isAdmin ? <ProductEditor visible={productModal} editing={editing} draft={draft} setDraft={setDraft} saving={saving} onClose={() => setProductModal(false)} onSave={saveProduct} /> : null}
       <MovementEditor visible={movementModal} product={selectedProduct} type={movementType} setType={setMovementType} quantity={quantity} setQuantity={setQuantity} note={note} setNote={setNote} saving={saving} onClose={() => setMovementModal(false)} onSave={saveMovement} />
-      {isAdmin ? <CoworkerEditor visible={coworkerModal} name={coworkerName} setName={setCoworkerName} username={coworkerUsername} setUsername={setCoworkerUsername} password={coworkerPassword} setPassword={setCoworkerPassword} passwordAgain={coworkerPasswordAgain} setPasswordAgain={setCoworkerPasswordAgain} saving={saving} onClose={() => setCoworkerModal(false)} onSave={saveCoworker} /> : null}
+      {isAdmin ? <CoworkerEditor visible={coworkerModal} name={coworkerName} setName={setCoworkerName} username={coworkerUsername} setUsername={setCoworkerUsername} email={coworkerEmail} setEmail={setCoworkerEmail} password={coworkerPassword} setPassword={setCoworkerPassword} passwordAgain={coworkerPasswordAgain} setPasswordAgain={setCoworkerPasswordAgain} saving={saving} onClose={() => setCoworkerModal(false)} onSave={saveCoworker} /> : null}
       <AccountModal visible={accountModal} displayName={displayName} username={username} role={role} organizationName={organizationName} subscriptionLabel={subscriptionLabel} isPlatformOperator={isPlatformOperator} saving={saving} onClose={() => setAccountModal(false)} onSignOut={signOut} onDelete={deleteAccount} />
       {isPlatformOperator ? <PlatformModal visible={platformModal} onClose={() => setPlatformModal(false)} /> : null}
     </SafeAreaView>
@@ -311,8 +327,8 @@ function MovementEditor({ visible, product, type, setType, quantity, setQuantity
   return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}><KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === "ios" ? "padding" : undefined}><View style={styles.modalSheet}><View style={styles.modalHandle} /><View style={styles.modalHead}><View><Text style={styles.eyebrow}>STOK HAREKETİ</Text><Text style={styles.modalTitle}>{product?.name}</Text><Text style={styles.modalStock}>Mevcut: {formatQty(product?.stock ?? 0)} {product?.unit}</Text></View><Pressable style={styles.closeButton} onPress={onClose}><Text style={styles.closeText}>×</Text></Pressable></View><View style={styles.segment}><Pressable style={[styles.segmentItem, type === "in" && styles.segmentInActive]} onPress={() => setType("in")}><Text style={[styles.segmentText, type === "in" && styles.segmentInText]}>＋ Stok ekle</Text></Pressable><Pressable style={[styles.segmentItem, type === "out" && styles.segmentOutActive]} onPress={() => setType("out")}><Text style={[styles.segmentText, type === "out" && styles.segmentOutText]}>− Stoktan düş</Text></Pressable></View><Field label={`Miktar (${product?.unit ?? ""})`} value={quantity} onChangeText={setQuantity} placeholder="0" keyboardType="decimal-pad" autoFocus /><Field label="İşlem notu (isteğe bağlı)" value={note} onChangeText={setNote} placeholder="Örn. Raf dolumu" /><Pressable style={[styles.saveButton, type === "out" && styles.saveButtonOut, saving && styles.disabled]} onPress={onSave} disabled={saving}>{saving ? <ActivityIndicator color="#172820" /> : <Text style={[styles.saveButtonText, type === "out" && styles.saveButtonOutText]}>{type === "in" ? "Stoğa ekle" : "Stoktan düş"}</Text>}</Pressable></View></KeyboardAvoidingView></Modal>;
 }
 
-function CoworkerEditor({ visible, name, setName, username, setUsername, password, setPassword, passwordAgain, setPasswordAgain, saving, onClose, onSave }: { visible: boolean; name: string; setName: (value: string) => void; username: string; setUsername: (value: string) => void; password: string; setPassword: (value: string) => void; passwordAgain: string; setPasswordAgain: (value: string) => void; saving: boolean; onClose: () => void; onSave: () => void }) {
-  return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}><KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === "ios" ? "padding" : undefined}><View style={styles.modalSheet}><View style={styles.modalHandle} /><View style={styles.modalHead}><View><Text style={styles.eyebrow}>EKİP YÖNETİMİ</Text><Text style={styles.modalTitle}>Yeni çalışan hesabı</Text><Text style={styles.modalStock}>Giriş bilgilerini çalışana güvenli şekilde iletin.</Text></View><Pressable style={styles.closeButton} onPress={onClose}><Text style={styles.closeText}>×</Text></Pressable></View><Field label="Ad ve soyad" value={name} onChangeText={setName} placeholder="Örn. Ayşe Yılmaz" autoCapitalize="words" autoFocus /><Field label="Kullanıcı adı" value={username} onChangeText={setUsername} placeholder="örn. ayse" autoCapitalize="none" autoCorrect={false} /><Field label="Şifre" value={password} onChangeText={setPassword} placeholder="En az 8 karakter" secureTextEntry textContentType="newPassword" /><Field label="Şifre tekrar" value={passwordAgain} onChangeText={setPasswordAgain} placeholder="Şifreyi yeniden gir" secureTextEntry textContentType="newPassword" onSubmitEditing={onSave} /><Pressable style={[styles.saveButton, saving && styles.disabled]} onPress={onSave} disabled={saving}>{saving ? <ActivityIndicator color="#172820" /> : <Text style={styles.saveButtonText}>Çalışan hesabını oluştur</Text>}</Pressable></View></KeyboardAvoidingView></Modal>;
+function CoworkerEditor({ visible, name, setName, username, setUsername, email, setEmail, password, setPassword, passwordAgain, setPasswordAgain, saving, onClose, onSave }: { visible: boolean; name: string; setName: (value: string) => void; username: string; setUsername: (value: string) => void; email: string; setEmail: (value: string) => void; password: string; setPassword: (value: string) => void; passwordAgain: string; setPasswordAgain: (value: string) => void; saving: boolean; onClose: () => void; onSave: () => void }) {
+  return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}><KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === "ios" ? "padding" : undefined}><View style={styles.modalSheet}><View style={styles.modalHandle} /><View style={styles.modalHead}><View><Text style={styles.eyebrow}>EKİP YÖNETİMİ</Text><Text style={styles.modalTitle}>Yeni çalışan hesabı</Text><Text style={styles.modalStock}>Doğrulama kodu çalışanın e-posta adresine gönderilir.</Text></View><Pressable style={styles.closeButton} onPress={onClose}><Text style={styles.closeText}>×</Text></Pressable></View><Field label="Ad ve soyad" value={name} onChangeText={setName} placeholder="Örn. Ayşe Yılmaz" autoCapitalize="words" autoFocus /><Field label="Doğrulama e-postası" value={email} onChangeText={setEmail} placeholder="ayse@ornek.com" autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress" /><Field label="Kullanıcı adı" value={username} onChangeText={setUsername} placeholder="örn. ayse" autoCapitalize="none" autoCorrect={false} /><Field label="Geçici şifre" value={password} onChangeText={setPassword} placeholder="En az 8 karakter" secureTextEntry textContentType="newPassword" /><Field label="Geçici şifre tekrar" value={passwordAgain} onChangeText={setPasswordAgain} placeholder="Şifreyi yeniden gir" secureTextEntry textContentType="newPassword" onSubmitEditing={onSave} /><Pressable style={[styles.saveButton, saving && styles.disabled]} onPress={onSave} disabled={saving}>{saving ? <ActivityIndicator color="#172820" /> : <Text style={styles.saveButtonText}>Doğrulama kodu gönder</Text>}</Pressable></View></KeyboardAvoidingView></Modal>;
 }
 
 function Field(props: ComponentProps<typeof TextInput> & { label: string }) {

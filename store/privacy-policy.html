@@ -41,31 +41,34 @@
     </section>
     <section>
       <h2>İşlenen veriler</h2>
-      <p>İşletme adı; kullanıcı adı, ad ve soyad, hesap rolü ve oturum bilgileri; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kayıt kötüye kullanımını sınırlandırmak için ağ adresinin geri döndürülemeyen özeti kısa süreyle tutulur. Gerçek e-posta adresi istenmez. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</p>
+      <p>İşletme adı; kullanıcı adı, ad ve soyad, kayıt sırasında sağlanan kurtarma e-postası ve doğrulama durumu, hesap rolü, oturum ve güvenlik kayıtları; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kötüye kullanımı sınırlandırmak için ağ adresinin geri döndürülemeyen özeti güvenlik kontrollerinde kullanılabilir. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</p>
     </section>
     <section>
       <h2>Kullanım amacı ve hizmet sağlayıcı</h2>
-      <p>Veriler yalnızca kimlik doğrulama, işletme hesabı açma, ortak stok takibi, kiralama yönetimi, yetkilendirme, güvenlik ve işlem geçmişi amaçlarıyla kullanılır. Reklam, satış, davranışsal takip veya analiz yapılmaz.</p>
+      <p>Veriler yalnızca kimlik doğrulama, e-posta doğrulama, hesap kurtarma, işletme hesabı açma, ortak stok takibi, kiralama yönetimi, yetkilendirme, güvenlik ve işlem geçmişi amaçlarıyla kullanılır. Reklam, satış, davranışsal takip veya analiz yapılmaz.</p>
       <p>Bulut veritabanı ve kimlik doğrulama altyapısı için Supabase hizmet sağlayıcı olarak kullanılır. Uygulama verileri Frankfurt bölgesindeki sunucularda tutulur.</p>
     </section>
     <section>
       <h2>Güvenlik ve saklama</h2>
       <p>Aktarım sırasında HTTPS/TLS kullanılır. Veritabanında satır düzeyi güvenlik, rol tabanlı yetkilendirme ve sunucu tarafında atomik stok işlemleri uygulanır. Hizmet rolü anahtarı mobil uygulamada bulunmaz.</p>
-      <p>Veriler hesap veya işletme çalışma alanı silinene kadar saklanır. İşletme yöneticisinin silme işlemi yalnızca kendi işletmesinin ürün, hareket ve kullanıcı kayıtlarını kaldırır. Yasal bir saklama zorunluluğu doğarsa yalnızca zorunlu süre boyunca tutulur.</p>
+      <p>Hesap ve stok verileri, hesap veya işletme çalışma alanı silinene kadar saklanır. İşletme yöneticisinin silme işlemi yalnızca kendi işletmesinin ürün, hareket ve kullanıcı kayıtlarını kaldırır. Çalışan hesabı silindikten sonra ortak stok geçmişindeki işlemler “Silinmiş kullanıcı” adıyla anonim kalır. Güvenlik ve kötüye kullanım önleme kayıtları; olay incelemesi, hizmet güvenliği veya yasal yükümlülükler için gerekli olduğu sınırlı süre boyunca erişimi kısıtlı olarak tutulabilir.</p>
     </section>
     <section id="hesap-silme" class="warning">
       <h2>Hesap ve veri silme</h2>
       <h3>Uygulama içinden</h3>
       <ol>
         <li>Stokdaş'a giriş yapın.</li>
+        <li>Geçici şifreyi değiştirme ekranı gösteriliyorsa önce kişisel ve güçlü bir şifre belirleyin, ardından yeni şifrenizle yeniden giriş yapın.</li>
         <li>Sağ üstteki profil simgesine dokunun.</li>
-        <li>“Hesabımı sil” seçeneğini açın.</li>
-        <li>İstenen doğrulama metnini girip kalıcı silmeyi onaylayın.</li>
+        <li>Çalışan hesabında “Hesabımı sil”, yönetici hesabında “İşletmeyi ve hesapları sil” seçeneğini açın.</li>
+        <li>Çalışansanız kullanıcı adınızı, yöneticiyseniz <strong>STOKDAŞ</strong> metnini ve mevcut şifrenizi girin.</li>
+        <li>Kalıcı silme düğmesine dokunarak işlemi onaylayın.</li>
       </ol>
-      <p>Çalışan hesabı silindiğinde ad, kullanıcı adı ve giriş hesabı kaldırılır. Ortak stok kayıtlarının bütünlüğü için geçmiş hareketler yalnızca “Silinmiş kullanıcı” adıyla anonim olarak kalır.</p>
+      <p>Çalışan hesabı silindiğinde ad, kullanıcı adı, kurtarma e-postası ve giriş hesabı kaldırılır. Ortak stok kayıtlarının bütünlüğü için geçmiş hareketler yalnızca “Silinmiş kullanıcı” adıyla anonim olarak kalır.</p>
       <p>Yönetici hesabı silindiğinde yalnızca o işletmenin ürünleri, stok hareketleri ve çalışan hesapları kalıcı olarak silinir; diğer işletmeler etkilenmez.</p>
+      <p>Platform yöneticisi hesabı güvenlik nedeniyle uygulama içinden silinemez; bu hesap için aşağıdaki destek kanalından talep oluşturulmalıdır.</p>
       <h3>Uygulamaya erişemiyorsanız</h3>
-      <p><a href="mailto:tirtarismail@gmail.com?subject=Stokda%C5%9F%20hesap%20silme%20talebi">Destek e-postasına</a> “Stokdaş hesap silme talebi” konusuyla kullanıcı adınızı gönderin. Kimlik doğrulamasından sonra talep en geç 30 gün içinde tamamlanır. Şifrenizi e-postayla göndermeyin.</p>
+      <p>Mümkünse hesabınızın doğrulanmış kurtarma e-posta adresinden <a href="mailto:tirtarismail@gmail.com?subject=Stokda%C5%9F%20hesap%20silme%20talebi">destek e-postasına</a> “Stokdaş hesap silme talebi” konusuyla kullanıcı adınızı gönderin. Kimlik doğrulamasından sonra talep en geç 30 gün içinde tamamlanır. Şifrenizi veya doğrulama kodunuzu e-postayla göndermeyin.</p>
     </section>
     <section>
       <h2>Haklarınız ve değişiklikler</h2>

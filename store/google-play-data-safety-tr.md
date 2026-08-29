@@ -10,7 +10,7 @@ Bu belge, mevcut 1.3.2 kaynak koduna göre Play Console formunu doldurmak için 
 - Kullanıcı veri silme talebinde bulunabilir mi? `Evet`
 - Uygulama hesap oluşturmayı destekliyor mu? `Evet — kullanıcı kendi işletmesini ve ilk yönetici hesabını, işletme yöneticisi çalışan hesaplarını oluşturur`
 - Uygulama içinde hesap silme var mı? `Evet — Hesabım > Hesabımı sil`
-- Uygulama dışında hesap silme kaynağı var mı? `Evet — yayımlanacak gizlilik/hesap silme web sayfası`
+- Uygulama dışında hesap silme kaynağı var mı? `Evet — https://stokdas.tirtarhan.chatgpt.site/gizlilik#hesap-silme`
 
 Supabase, geliştirici adına altyapı hizmeti veren veri işleyen/hizmet sağlayıcıdır. Hizmet sağlayıcıya aktarım, Google Play tanımına göre “paylaşım” olarak işaretlenmez; veri yine de “toplanan” olarak beyan edilir.
 
@@ -25,6 +25,15 @@ Supabase, geliştirici adına altyapı hizmeti veren veri işleyen/hizmet sağla
 - Amaç: `Uygulama işlevselliği`, `Hesap yönetimi`
 - Açıklama: Kullanıcı kendi işletmesini kaydederken adını girer; yönetici çalışan hesabı oluştururken çalışanın görünen adını girer. İşlem geçmişinde işlemi yapan kişi gösterilir.
 
+### Kişisel bilgiler > Diğer kişisel bilgiler
+
+- Toplanan: `Evet`
+- Paylaşılan: `Hayır`
+- Geçici işleme: `Hayır`
+- Zorunlu: `Evet`
+- Amaç: `Uygulama işlevselliği`, `Hesap yönetimi`
+- Açıklama: İşletme adı ve kullanıcının işletmedeki rolü, ortak stok alanını ve yetkileri yönetmek için saklanır.
+
 ### Kişisel bilgiler > Kullanıcı kimlikleri
 
 - Toplanan: `Evet`
@@ -32,7 +41,16 @@ Supabase, geliştirici adına altyapı hizmeti veren veri işleyen/hizmet sağla
 - Geçici işleme: `Hayır`
 - Zorunlu: `Evet`
 - Amaç: `Uygulama işlevselliği`, `Hesap yönetimi`, `Dolandırıcılığı önleme, güvenlik ve uygunluk`
-- Açıklama: Kullanıcı adı ve Supabase tarafından üretilen hesap kimliği kimlik doğrulama/yetkilendirme için kullanılır. Gerçek e-posta adresi toplanmaz; dahili `@stokta.invalid` adresi kullanıcı adından otomatik üretilir.
+- Açıklama: Kullanıcı adı ve Supabase tarafından üretilen hesap kimliği kimlik doğrulama/yetkilendirme için kullanılır. Eski hesapların dahili `@stokta.invalid` kimlikleri geriye dönük uyumluluk için korunur.
+
+### E-posta adresi
+
+- Toplanıyor: `Evet`
+- Paylaşılıyor: `Hayır`
+- Geçici işleme: `Hayır`
+- Zorunlu: `Evet`
+- Amaç: `Hesap yönetimi`, `Dolandırıcılığı önleme, güvenlik ve uygunluk`
+- Açıklama: Kayıt sırasında sağlanan e-posta adresi yeni işletme veya çalışan hesabını etkinleştirmek için doğrulanır; etkin hesapta kurtarma e-postası olarak güvenlik bildirimleri ve şifre kurtarma için kullanılır.
 
 ### Uygulama etkinliği > Kullanıcı tarafından oluşturulan diğer içerikler
 
@@ -57,17 +75,19 @@ Supabase, geliştirici adına altyapı hizmeti veren veri işleyen/hizmet sağla
 - Toplanan: `Evet`
 - Paylaşılan: `Hayır`
 - Geçici işleme: `Hayır`
-- Zorunlu: `Yalnızca yeni işletme kaydı sırasında`
+- Zorunlu: `Hesap ve güvenlik işlemleri sırasında gerekli`
 - Amaç: `Dolandırıcılığı önleme, güvenlik ve uygunluk`
-- Açıklama: Toplu sahte kayıtları sınırlandırmak için ağ adresinin tek yönlü özeti saatlik hız sınırında kullanılır. Ham ağ adresi bu tabloda saklanmaz; süresi geçmiş özetler temizlenir.
+- Açıklama: İstek sırasında Supabase/API altyapısına ulaşan ağ adresi ve bundan türetilen tek yönlü özet, hesap güvenliği ve kötüye kullanımı önleme amacıyla hizmet günlüklerinde ve güvenlik kayıtlarında işlenebilir. Ham ağ adresi uygulamanın hız sınırı tablosunda saklanmaz.
 
 ## Toplanmayan veri türleri
 
-Konum, gerçek e-posta, telefon, adres, finans, sağlık, mesajlar, fotoğraf/video/ses, dosya, takvim, kişiler, web geçmişi, yüklü uygulamalar, reklam kimliği, analiz, çökme kaydı ve tanılama verisi uygulama kodu tarafından toplanmaz. Reklam veya analiz SDK'sı yoktur.
+Konum, telefon, adres, finans, sağlık, mesajlar, fotoğraf/video/ses, dosya, takvim, kişiler, web geçmişi, yüklü uygulamalar, reklam kimliği, analiz, çökme kaydı ve tanılama verisi uygulama kodu tarafından toplanmaz. Reklam veya analiz SDK'sı yoktur.
 
 ## Silme davranışı
 
-- Çalışan silme: Auth hesabı ve profilindeki ad/kullanıcı adı kaldırılır. Ortak stok kayıt bütünlüğü için geçmiş hareketler “Silinmiş kullanıcı” olarak anonim kalır.
+- Uygulama içi silme onayı: Kullanıcı doğrulama metnini ve mevcut şifresini girer. Geçici şifreyle açılmış hesap, silmeden önce zorunlu şifre değişikliğini tamamlamalıdır.
+- Çalışan silme: Auth hesabı, kurtarma e-postası ve profilindeki ad/kullanıcı adı kaldırılır. Ortak stok kayıt bütünlüğü için geçmiş hareketler “Silinmiş kullanıcı” olarak anonim kalır.
 - İşletme yöneticisi silme: Yalnızca bağlı işletmenin ürünleri, stok hareketleri, yönetici profili ve çalışan hesapları kalıcı olarak silinir; diğer kiracı işletmeler etkilenmez.
+- Güvenlik kayıtları: Güvenlik ve kötüye kullanım önleme kayıtları; olay incelemesi, hizmet güvenliği veya yasal yükümlülükler için gerekli olduğu sınırlı süre boyunca erişimi kısıtlı olarak tutulabilir. Play formu gönderilmeden önce canlı sistemdeki saklama süresi ve otomatik temizleme davranışı doğrulanmalıdır.
 
 Google Play, üçüncü taraf SDK'ların işlediği veriler dahil tüm geliştirici beyanlarının doğru olmasını ister. Kaynak: [Veri Güvenliği formu](https://support.google.com/googleplay/android-developer/answer/10787469?hl=en).

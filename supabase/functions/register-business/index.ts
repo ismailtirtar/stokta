@@ -171,3 +171,4 @@ Deno.serve(async (req: Request) => {
     return json(500, { error: "Kayıt tamamlanamadı. Lütfen tekrar deneyin." });
   }
 });
+
