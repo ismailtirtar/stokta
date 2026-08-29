@@ -1,4 +1,4 @@
-# Stokdaş 1.3.2 — Google Play yayın kontrol listesi
+# Stokdaş 1.3.3 (12) — Google Play yayın kontrol listesi
 
 ## Hazır olanlar
 
@@ -10,6 +10,10 @@
 - [x] 512 × 512 Play simgesi hazırlandı
 - [x] 1024 × 500 özellik grafiği hazırlandı
 - [x] Uygulama içi gizlilik politikası eklendi
+- [x] İçerik oluşturmadan önce 2026-08-29-v1 Kullanım Koşulları kabulü eklendi
+- [x] Ürün, stok hareketi notu ve kullanıcı için uygulama içi bildirme akışı eklendi
+- [x] İşletme yöneticileri için bildirim inceleme ve ölçülü moderasyon işlemleri eklendi
+- [x] Kullanım koşulları ve gizlilik politikası UGC/bildirim/moderasyon verilerini açıklar
 - [x] Çalışan ve yönetici için kalıcı hesap/veri silme akışı eklendi
 - [x] Supabase silme işlevi JWT doğrulamasıyla canlıya alındı
 - [x] Uygulama içinden güvenli işletme kaydı ve 14 günlük deneme akışı eklendi
@@ -22,9 +26,10 @@
 - [ ] Gizlilik ve hesap silme HTML sayfası herkese açık, sabit bir HTTPS adresinde yayımlanmalı
 - [ ] Temiz uygulama ekran görüntüleri alınmalı; şifre veya kişisel veri görünmemeli
 - [ ] Play Console'da uygulama oluşturulmalı: Uygulama / Ücretsiz / varsayılan dil Türkçe
-- [ ] Uygulama erişimi için geçici bir çalışan inceleme hesabı oluşturulmalı
-- [ ] Veri Güvenliği, içerik derecelendirmesi, hedef kitle, reklam ve haber uygulaması beyanları doldurulmalı
-- [ ] Üretim AAB'si EAS Build ile oluşturulmalı ve Play Console'a yüklenmeli
+- [ ] Uygulama erişimi için inceleme hesabı oluşturulmalı; ilk girişte Kullanım Koşulları kabul edilerek ürün/hareket bildirme ve yönetici inceleme akışı doğrulanmalı
+- [ ] Veri Güvenliği formunda kullanıcı tarafından oluşturulan içerik, içerik bildirimi ve moderasyon kayıtlarının işlevsellik ile güvenlik/uygunluk amaçları doğru beyan edilmeli
+- [ ] İçerik derecelendirmesi, hedef kitle, reklam ve haber uygulaması beyanları doldurulmalı
+- [ ] 1.3.3 (12) AAB'si EAS Build ile oluşturulmalı ve Play Console iç test sürümüne yüklenmeli
 - [ ] Kapalı test şartı uygulanıyorsa test tamamlanmalı
 
 ## Play Console için önerilen beyanlar

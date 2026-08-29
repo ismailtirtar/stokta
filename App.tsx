@@ -30,7 +30,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-      {!isCloudConfigured ? <SetupRequired /> : loading ? <Loading /> : session ? <InventoryScreen session={session} /> : <LoginScreen />}
+      {!isCloudConfigured ? <SetupRequired /> : loading ? <Loading /> : session ? <InventoryScreen key={session.user.id} session={session} /> : <LoginScreen />}
     </SafeAreaProvider>
   );
 }

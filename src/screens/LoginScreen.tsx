@@ -14,6 +14,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { normalizeUsername, supabase } from "../lib/supabase";
+import { CURRENT_UGC_TERMS_VERSION } from "../lib/ugc";
+import TermsModal from "../components/TermsModal";
 
 type Mode = "signIn" | "register";
 type RecoveryStage = "request" | "verify" | "complete";
@@ -42,6 +44,8 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [registrationTermsAccepted, setRegistrationTermsAccepted] = useState(false);
+  const [termsModal, setTermsModal] = useState(false);
 
   const isRegister = mode === "register";
   const isVerification = Boolean(verificationUsername);
@@ -61,6 +65,7 @@ export default function LoginScreen() {
     setResetTicket("");
     setNewPassword("");
     setNewPasswordAgain("");
+    setRegistrationTermsAccepted(false);
   }
 
   async function useSession(data: unknown) {
@@ -135,6 +140,10 @@ export default function LoginScreen() {
       setError("Şifreler eşleşmiyor.");
       return;
     }
+    if (!registrationTermsAccepted) {
+      setError("İşletme hesabı oluşturmak için Kullanım Koşulları ve Topluluk Kuralları’nı kabul edin.");
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -146,6 +155,8 @@ export default function LoginScreen() {
         username: normalizedUsername,
         recoveryEmail: normalizedEmail,
         password,
+        ugcTermsAccepted: true,
+        ugcTermsVersion: CURRENT_UGC_TERMS_VERSION,
       },
     });
     setLoading(false);
@@ -346,17 +357,47 @@ export default function LoginScreen() {
                 </View>
                 {isRegister ? <Field label="Şifre tekrar" value={passwordAgain} onChangeText={setPasswordAgain} placeholder="Şifreyi yeniden gir" secureTextEntry={secure} textContentType="newPassword" onSubmitEditing={registerBusiness} returnKeyType="done" /> : null}
 
+                {isRegister ? (
+                  <View style={styles.termsConsentBox}>
+                    <Pressable
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: registrationTermsAccepted, disabled: loading }}
+                      accessibilityLabel="Kullanım Koşulları ve Topluluk Kurallarını kabul ediyorum"
+                      style={styles.termsConsentRow}
+                      onPress={() => setRegistrationTermsAccepted((value) => !value)}
+                      disabled={loading}
+                    >
+                      <View style={[styles.checkbox, registrationTermsAccepted && styles.checkboxChecked]}>{registrationTermsAccepted ? <Text style={styles.checkmark}>✓</Text> : null}</View>
+                      <Text style={styles.termsConsentText}>Kullanım Koşulları ve Topluluk Kuralları’nı okudum, kabul ediyorum.</Text>
+                    </Pressable>
+                    <Pressable accessibilityRole="button" style={styles.termsLinkButton} onPress={() => setTermsModal(true)}>
+                      <Text style={styles.termsLinkText}>Koşulları aç ve incele</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+
                 <Message error={error} notice={notice} />
-                <PrimaryButton label={isRegister ? "İşletme hesabını oluştur" : "Giriş yap"} loading={loading} onPress={isRegister ? registerBusiness : signIn} />
+                <PrimaryButton label={isRegister ? "İşletme hesabını oluştur" : "Giriş yap"} loading={loading} disabled={isRegister && !registrationTermsAccepted} onPress={isRegister ? registerBusiness : signIn} />
                 {!isRegister ? <Pressable style={styles.linkButton} onPress={() => { setRecoveryIdentifier(username); setRecoveryStage("request"); setError(""); setNotice(""); }}><Text style={styles.linkText}>Şifremi unuttum</Text></Pressable> : null}
-                {isRegister ? <Text style={styles.help}>Kaydolarak verilerinizin işletmeniz için bulutta tutulmasını ve gizlilik politikasını kabul edersiniz.</Text> : <Text style={styles.help}>Çalışan hesabınızı işletme yöneticiniz oluşturur.</Text>}
-                <Pressable style={styles.privacyButton} onPress={() => void Linking.openURL(privacyUrl)}><Text style={styles.privacyText}>Gizlilik politikası</Text></Pressable>
+                {isRegister ? <Text style={styles.help}>Hesabınız etkinleştirildikten sonra güncel koşul kabulü güvenli biçimde hesabınıza kaydedilir.</Text> : <Text style={styles.help}>Çalışan hesabınızı işletme yöneticiniz oluşturur.</Text>}
+                <View style={styles.policyLinks}>
+                  <Pressable accessibilityRole="link" style={styles.privacyButton} onPress={() => setTermsModal(true)}><Text style={styles.privacyText}>Kullanım koşulları</Text></Pressable>
+                  <Pressable accessibilityRole="link" style={styles.privacyButton} onPress={() => void Linking.openURL(privacyUrl)}><Text style={styles.privacyText}>Gizlilik politikası</Text></Pressable>
+                </View>
               </>
             )}
           </View>
           <Text style={styles.cloud}>● Frankfurt sunucusuna bağlı</Text>
         </ScrollView>
       </KeyboardAvoidingView>
+      <TermsModal
+        visible={termsModal}
+        mandatory={false}
+        accepted={false}
+        reviewOnly
+        onAccept={() => undefined}
+        onClose={() => setTermsModal(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -370,8 +411,9 @@ function Message({ error, notice }: { error: string; notice: string }) {
   return <>{error ? <Text style={styles.error}>{error}</Text> : null}{notice ? <Text style={styles.notice}>{notice}</Text> : null}</>;
 }
 
-function PrimaryButton({ label, loading, onPress }: { label: string; loading: boolean; onPress: () => void | Promise<void> }) {
-  return <Pressable style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, loading && styles.buttonDisabled]} onPress={() => void onPress()} disabled={loading}>{loading ? <ActivityIndicator color="#172820" /> : <Text style={styles.buttonText}>{label}</Text>}</Pressable>;
+function PrimaryButton({ label, loading, disabled = false, onPress }: { label: string; loading: boolean; disabled?: boolean; onPress: () => void | Promise<void> }) {
+  const unavailable = loading || disabled;
+  return <Pressable accessibilityRole="button" accessibilityState={{ disabled: unavailable, busy: loading }} style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, unavailable && styles.buttonDisabled]} onPress={() => void onPress()} disabled={unavailable}>{loading ? <ActivityIndicator color="#172820" /> : <Text style={styles.buttonText}>{label}</Text>}</Pressable>;
 }
 
 function SecondaryButton({ label, disabled, onPress, full = false }: { label: string; disabled: boolean; onPress: () => void | Promise<void>; full?: boolean }) {
@@ -444,6 +486,15 @@ const styles = StyleSheet.create({
   linkButton: { alignItems: "center", paddingTop: 14 },
   linkText: { color: "#287153", fontSize: 11, fontWeight: "800" },
   help: { marginTop: 13, color: "#8a918d", textAlign: "center", fontSize: 10, lineHeight: 15 },
+  termsConsentBox: { marginTop: 3, padding: 11, borderWidth: 1, borderColor: "#dce2dc", borderRadius: 11, backgroundColor: "#fff" },
+  termsConsentRow: { flexDirection: "row", alignItems: "flex-start" },
+  checkbox: { width: 20, height: 20, marginRight: 9, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: "#9ba59f", borderRadius: 6, backgroundColor: "#fff" },
+  checkboxChecked: { borderColor: "#2e7657", backgroundColor: "#2e7657" },
+  checkmark: { color: "#fff", fontSize: 13, fontWeight: "900" },
+  termsConsentText: { flex: 1, color: "#5f6b64", fontSize: 10, lineHeight: 15 },
+  termsLinkButton: { alignSelf: "flex-start", marginTop: 8, marginLeft: 29, paddingVertical: 2 },
+  termsLinkText: { color: "#287153", fontSize: 10, fontWeight: "900", textDecorationLine: "underline" },
+  policyLinks: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 18 },
   privacyButton: { alignItems: "center", paddingTop: 8 },
   privacyText: { color: "#3f6f5a", fontSize: 10, fontWeight: "800", textDecorationLine: "underline" },
   cloud: { marginTop: 18, color: "#7fa993", textAlign: "center", fontSize: 10, fontWeight: "700" },

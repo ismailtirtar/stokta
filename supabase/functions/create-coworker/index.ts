@@ -14,6 +14,8 @@ import {
 
 type PendingRow = { id: string; auth_user_id: string; expires_at: string };
 
+const CURRENT_UGC_TERMS_VERSION = "2026-08-29-v1";
+
 async function removeExpiredPending(
   admin: any,
   rows: PendingRow[],
@@ -67,13 +69,16 @@ Deno.serve(async (req: Request) => {
 
     const { data: caller, error: callerError } = await admin
       .from("profiles")
-      .select("id,role,organization_id,must_change_password")
+      .select("id,role,organization_id,ugc_terms_version,ugc_terms_accepted_at,is_active,must_change_password")
       .eq("id", userData.user.id)
       .eq("is_active", true)
       .maybeSingle();
     if (callerError) throw callerError;
     if (!caller || caller.role !== "admin" || caller.must_change_password) {
       return json(403, { error: "Bu işlem yalnızca işletme yöneticisine açıktır" });
+    }
+    if (!caller.ugc_terms_accepted_at || caller.ugc_terms_version !== CURRENT_UGC_TERMS_VERSION) {
+      return json(403, { error: "Çalışan eklemek için güncel Kullanım Koşulları ve Topluluk Kuralları kabul edilmelidir" });
     }
 
     const { data: organization, error: organizationError } = await admin

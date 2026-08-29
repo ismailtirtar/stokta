@@ -23,6 +23,9 @@ type Props = {
   isPlatformOperator: boolean;
   saving: boolean;
   onClose: () => void;
+  onOpenTerms: () => void;
+  onOpenSafetyCenter: () => void;
+  onOpenPlatformSafetyCenter: () => void;
   onSignOut: () => void;
   onDelete: (confirmation: string, currentPassword: string) => void;
 };
@@ -37,6 +40,9 @@ export default function AccountModal({
   isPlatformOperator,
   saving,
   onClose,
+  onOpenTerms,
+  onOpenSafetyCenter,
+  onOpenPlatformSafetyCenter,
   onSignOut,
   onDelete,
 }: Props) {
@@ -60,7 +66,7 @@ export default function AccountModal({
     && !saving;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={saving ? () => undefined : onClose}>
       <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.sheet}>
           <View style={styles.handle} />
@@ -79,7 +85,7 @@ export default function AccountModal({
           </View>
 
           {page === "account" ? (
-            <View>
+            <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.profileCard}>
                 <View style={styles.avatar}><Text style={styles.avatarText}>{initials(displayName)}</Text></View>
                 <View style={styles.profileText}>
@@ -93,6 +99,28 @@ export default function AccountModal({
                 <View><Text style={styles.menuTitle}>Gizlilik politikası</Text><Text style={styles.menuCaption}>Verilerin nasıl işlendiğini görüntüle</Text></View>
                 <Text style={styles.chevron}>›</Text>
               </Pressable>
+              <Pressable style={styles.menuItem} onPress={onOpenTerms} accessibilityRole="button">
+                <View><Text style={styles.menuTitle}>Kullanım koşulları</Text><Text style={styles.menuCaption}>İçerik ve güvenli kullanım kurallarını incele</Text></View>
+                <Text style={styles.chevron}>›</Text>
+              </Pressable>
+              {isAdmin ? <Pressable
+                style={styles.menuItem}
+                onPress={onOpenSafetyCenter}
+                accessibilityRole="button"
+                accessibilityLabel="İşletme Güvenlik Merkezini aç"
+              >
+                <View><Text style={styles.menuTitle}>Güvenlik Merkezi</Text><Text style={styles.menuCaption}>Bu işletmedeki içerik ve kullanıcı bildirimlerini incele</Text></View>
+                <View style={styles.openPill}><Text style={styles.openPillText}>AÇIK</Text></View>
+              </Pressable> : null}
+              {isPlatformOperator ? <Pressable
+                style={styles.menuItem}
+                onPress={onOpenPlatformSafetyCenter}
+                accessibilityRole="button"
+                accessibilityLabel="Platform Güvenlik Kuyruğunu aç"
+              >
+                <View><Text style={styles.menuTitle}>Platform Güvenlik Kuyruğu</Text><Text style={styles.menuCaption}>İşletme yöneticileri hakkındaki bildirimleri incele</Text></View>
+                <View style={styles.platformPill}><Text style={styles.platformPillText}>PLATFORM</Text></View>
+              </Pressable> : null}
               <Pressable style={styles.menuItem} onPress={onSignOut}>
                 <View><Text style={styles.menuTitle}>Çıkış yap</Text><Text style={styles.menuCaption}>Yalnızca bu cihazdaki oturumu kapat</Text></View>
                 <Text style={styles.chevron}>›</Text>
@@ -102,8 +130,8 @@ export default function AccountModal({
                 <Text style={styles.dangerChevron}>›</Text>
               </Pressable> : null}
 
-              <Text style={styles.version}>Stokdaş · Sürüm 1.3.2</Text>
-            </View>
+              <Text style={styles.version}>Stokdaş · Sürüm 1.3.3</Text>
+            </ScrollView>
           ) : null}
 
           {page === "privacy" ? <PrivacyPolicy /> : null}
@@ -156,11 +184,11 @@ export default function AccountModal({
 function PrivacyPolicy() {
   return (
     <ScrollView style={styles.policy} showsVerticalScrollIndicator={false}>
-      <Text style={styles.policyDate}>Yürürlük tarihi: 25 Ağustos 2026</Text>
+      <Text style={styles.policyDate}>Yürürlük tarihi: 29 Ağustos 2026</Text>
       <PolicySection title="Veri sorumlusu">Stokdaş uygulaması İsmail Tırtar tarafından işletilir. Hizmet, kiracı işletmelerin stok ve kullanıcı verilerini birbirinden ayrılmış çalışma alanlarında yönetmesini sağlar.</PolicySection>
-      <PolicySection title="İşlenen veriler">İşletme adı; kullanıcı adı, ad ve soyad, doğrulanmış kurtarma e-postası, hesap rolü, oturum ve güvenlik kayıtları; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kötüye kullanımı sınırlandırmak için ağ adresinin geri döndürülemeyen özeti güvenlik kontrollerinde kullanılabilir. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</PolicySection>
-      <PolicySection title="Amaç ve paylaşım">Veriler yalnızca kimlik doğrulama, e-posta doğrulama, hesap kurtarma, işletme hesabı açma, ortak stok takibi, kiralama yönetimi, yetkilendirme, güvenlik ve işlem geçmişi amaçlarıyla kullanılır. Reklam, veri satışı veya kullanıcı takibi yapılmaz. Altyapı sağlayıcısı olarak Supabase kullanılır; veriler Frankfurt bölgesindeki sunucularda tutulur.</PolicySection>
-      <PolicySection title="Saklama ve silme">Veriler hesap veya işletme çalışma alanı silinene kadar saklanır. Çalışan hesabı silindiğinde profil bilgileri kaldırılır ve eski hareketler anonimleştirilir. İşletme yöneticisi silme işlemini başlattığında yalnızca kendi işletmesinin verileri ve hesapları kalıcı olarak kaldırılır.</PolicySection>
+      <PolicySection title="İşlenen veriler">İşletme adı; kullanıcı adı, ad ve soyad, doğrulanmış kurtarma e-postası, hesap rolü, oturum ve güvenlik kayıtları; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kullanım koşullarının sürümü ve kabul zamanı da kaydedilir. Bir içerik veya kullanıcı bildirildiğinde hedef kayıt, neden, isteğe bağlı açıklama, bildiren hesap, zaman ve yöneticinin moderasyon işlemi tutulur. Kötüye kullanımı sınırlandırmak için ağ adresinin geri döndürülemeyen özeti güvenlik kontrollerinde kullanılabilir. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</PolicySection>
+      <PolicySection title="Amaç ve paylaşım">Veriler yalnızca kimlik doğrulama, e-posta doğrulama, hesap kurtarma, işletme hesabı açma, ortak stok takibi, kiralama yönetimi, yetkilendirme, güvenlik, içerik moderasyonu ve işlem geçmişi amaçlarıyla kullanılır. İşletme içindeki içerik ve çalışan bildirimleri yalnızca o işletmenin yöneticilerine; işletme yöneticileri hakkındaki bildirimler ise yalnızca yetkili platform operatörlerine gösterilir. Reklam, veri satışı veya kullanıcı takibi yapılmaz. Altyapı sağlayıcısı olarak Supabase kullanılır; veriler Frankfurt bölgesindeki sunucularda tutulur.</PolicySection>
+      <PolicySection title="Saklama ve silme">Veriler hesap veya işletme çalışma alanı silinene kadar saklanır. Moderasyon bildirimleri, kararların tutarlılığı ve kötüye kullanımın önlenmesi için hedef içerik kaldırıldıktan veya bildirim çözüldükten sonra da işletme çalışma alanı silinene kadar saklanabilir. Çalışan hesabı silindiğinde profil bilgileri kaldırılır ve eski hareketler anonimleştirilir. İşletme yöneticisi silme işlemini başlattığında yalnızca kendi işletmesinin verileri ve hesapları kalıcı olarak kaldırılır.</PolicySection>
       <PolicySection title="Güvenlik">Aktarım sırasında HTTPS kullanılır. Her kayıt işletme kimliğiyle ayrılır; veritabanında satır düzeyi güvenlik ve rol tabanlı yetkilendirme uygulanır. Bir işletme diğer işletmenin ürün, hareket veya kullanıcı verilerini okuyamaz. Hizmet rolü anahtarı mobil uygulamaya eklenmez.</PolicySection>
       <PolicySection title="Haklarınız">Hesabınızı bu ekrandaki “Hesabımı sil” seçeneğiyle silebilirsiniz. İşletme yöneticisi yalnızca kendi işletmesinin çalışma alanını kaldırabilir. Platform yöneticisi hesabı güvenlik nedeniyle uygulama içinden silinemez. Gizlilik ve veri talepleri için tirtarismail@gmail.com adresine ulaşabilirsiniz.</PolicySection>
       <View style={styles.policyBottom} />
@@ -197,6 +225,10 @@ const styles = StyleSheet.create({
   menuTitle: { color: "#26322c", fontSize: 12, fontWeight: "800" },
   menuCaption: { marginTop: 4, color: "#8a918d", fontSize: 9 },
   chevron: { color: "#89938e", fontSize: 23 },
+  openPill: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 20, backgroundColor: "#fff0db" },
+  openPillText: { color: "#9a601f", fontSize: 8, fontWeight: "900" },
+  platformPill: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 20, backgroundColor: "#e8eef8" },
+  platformPillText: { color: "#46658e", fontSize: 8, fontWeight: "900" },
   dangerItem: { marginTop: 8, borderBottomWidth: 0 },
   dangerTitle: { color: "#a84d43", fontSize: 12, fontWeight: "800" },
   dangerCaption: { marginTop: 4, color: "#b57870", fontSize: 9 },

@@ -3,7 +3,7 @@
     "name": "Stokdaş",
     "slug": "dukkan-stok-takip",
     "owner": "homra",
-    "version": "1.3.2",
+    "version": "1.3.3",
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -13,7 +13,7 @@
     "newArchEnabled": true,
     "android": {
       "package": "com.ismailtirtar.stokta",
-      "versionCode": 10,
+      "versionCode": 12,
       "softwareKeyboardLayoutMode": "resize",
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",

@@ -16,6 +16,8 @@ type PendingRow = {
   expires_at: string;
 };
 
+const CURRENT_UGC_TERMS_VERSION = "2026-08-29-v1";
+
 function slugBase(value: string) {
   return value
     .trim()
@@ -68,7 +70,12 @@ Deno.serve(async (req: Request) => {
     const username = normalizeUsername(body.username);
     const recoveryEmail = normalizeRecoveryEmail(body.recoveryEmail);
     const password = typeof body.password === "string" ? body.password : "";
+    const ugcTermsAccepted = body.ugcTermsAccepted === true;
+    const ugcTermsVersion = typeof body.ugcTermsVersion === "string" ? body.ugcTermsVersion : "";
 
+    if (!ugcTermsAccepted || ugcTermsVersion !== CURRENT_UGC_TERMS_VERSION) {
+      return json(400, { error: "Güncel Kullanım Koşulları ve Topluluk Kuralları kabul edilmelidir" });
+    }
     if (organizationName.length < 2 || organizationName.length > 100) {
       return json(400, { error: "İşletme adı 2-100 karakter olmalı" });
     }
@@ -208,6 +215,8 @@ Deno.serve(async (req: Request) => {
       display_name: displayName,
       organization_name: organizationName,
       organization_slug: organizationSlug,
+      ugc_terms_version: CURRENT_UGC_TERMS_VERSION,
+      ugc_terms_accepted_at: new Date().toISOString(),
     });
     if (pendingError) {
       console.error("Pending business registration could not be stored", pendingError);
