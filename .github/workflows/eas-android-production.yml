@@ -5,9 +5,13 @@ on:
     branches:
       - codex/stokdas-live-security-sync
     paths:
-      - .github/workflows/eas-android-production.yml
       - .github/eas-build-trigger
   workflow_dispatch:
+    inputs:
+      build_id:
+        description: Existing successful EAS build ID to reuse
+        required: false
+        type: string
 
 concurrency:
   group: stokdas-eas-android-production
@@ -23,6 +27,7 @@ jobs:
     timeout-minutes: 90
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      REQUESTED_BUILD_ID: ${{ inputs.build_id || '' }}
 
     steps:
       - name: Check Expo authentication
@@ -46,7 +51,7 @@ jobs:
         if: steps.expo_auth.outputs.available == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -65,32 +70,58 @@ jobs:
           packager: npm
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build Stokdaş production AAB
+      - name: Resolve successful EAS build
         if: steps.expo_auth.outputs.available == 'true'
         id: eas_build
         shell: bash
         run: |
-          eas build --platform android --profile production --non-interactive --wait --json > eas-build.json
-          BUILD_ID="$(jq -r 'if type == "array" then .[0].id else .id end' eas-build.json)"
+          BUILD_ID="$REQUESTED_BUILD_ID"
+          if [ -z "$BUILD_ID" ] && [ -f .github/eas-build-trigger ]; then
+            BUILD_ID="$(sed -n 's/^build_id=//p' .github/eas-build-trigger | head -n 1 | tr -d '\r')"
+          fi
+
+          if [ -z "$BUILD_ID" ]; then
+            eas build --platform android --profile production --non-interactive --wait --json > eas-build-submit.json
+            BUILD_ID="$(jq -r 'if type == "array" then .[0].id else .id end' eas-build-submit.json)"
+          else
+            echo "::notice::Reusing successful EAS build $BUILD_ID."
+          fi
+
           if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" = "null" ]; then
             echo "::error::EAS build ID could not be determined."
             exit 1
           fi
-          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Download signed AAB
-        if: steps.expo_auth.outputs.available == 'true'
-        id: download
-        shell: bash
-        run: |
-          eas build:download --build-id "${{ steps.eas_build.outputs.build_id }}" --non-interactive --json > eas-download.json
-          AAB_PATH="$(jq -r '.path' eas-download.json)"
-          if [ ! -f "$AAB_PATH" ]; then
-            echo "::error::Downloaded AAB was not found."
+          eas build:view "$BUILD_ID" --json > eas-build.json
+          STATUS="$(jq -r '.status // empty' eas-build.json)"
+          PLATFORM="$(jq -r '.platform // empty' eas-build.json)"
+          if [ "$STATUS" != "FINISHED" ] || [ "$PLATFORM" != "ANDROID" ]; then
+            echo "::error::EAS build is not a finished Android build (status=$STATUS, platform=$PLATFORM)."
             exit 1
           fi
-          cp "$AAB_PATH" stokdas-1.3.3.aab
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download and verify signed AAB
+        if: steps.expo_auth.outputs.available == 'true'
+        shell: bash
+        env:
+          BUILD_ID: ${{ steps.eas_build.outputs.build_id }}
+        run: |
+          AAB_URL="$(jq -r '.artifacts.applicationArchiveUrl // empty' eas-build.json)"
+          if [ -z "$AAB_URL" ]; then
+            echo "::error::EAS build has no application archive URL."
+            exit 1
+          fi
+
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --connect-timeout 30 --output stokdas-1.3.3.aab "$AAB_URL"
+          if [ ! -s stokdas-1.3.3.aab ]; then
+            echo "::error::Downloaded AAB is empty or missing."
+            exit 1
+          fi
+          unzip -tq stokdas-1.3.3.aab
           sha256sum stokdas-1.3.3.aab > stokdas-1.3.3.aab.sha256
+          echo "EAS build: $BUILD_ID"
 
       - name: Upload AAB artifact
         if: steps.expo_auth.outputs.available == 'true'
