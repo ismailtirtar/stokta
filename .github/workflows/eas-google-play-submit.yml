@@ -1,0 +1,116 @@
+name: Stokdaş Google Play Internal Submit
+
+on:
+  push:
+    branches:
+      - codex/stokdas-live-security-sync
+    paths:
+      - .github/play-submit-trigger
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: Successful Android EAS build ID
+        required: true
+        type: string
+
+concurrency:
+  group: stokdas-google-play-submit
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    name: Submit AAB to Google Play internal testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      REQUESTED_BUILD_ID: ${{ inputs.build_id || '' }}
+
+    steps:
+      - name: Check Expo authentication
+        id: expo_auth
+        shell: bash
+        run: |
+          if [ -n "$EXPO_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::error::EXPO_TOKEN is not configured."
+            exit 1
+          fi
+
+      - name: Checkout PR source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify TypeScript
+        run: npm run typecheck
+
+      - name: Set up EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 23.0.0
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Resolve Android build
+        id: build
+        shell: bash
+        run: |
+          BUILD_ID="$REQUESTED_BUILD_ID"
+          if [ -z "$BUILD_ID" ] && [ -f .github/play-submit-trigger ]; then
+            BUILD_ID="$(sed -n 's/^build_id=//p' .github/play-submit-trigger | head -n 1 | tr -d '\r')"
+          fi
+          if [ -z "$BUILD_ID" ]; then
+            echo "::error::No EAS build ID was supplied."
+            exit 1
+          fi
+
+          eas build:view "$BUILD_ID" --json > eas-build.json
+          STATUS="$(jq -r '.status // empty' eas-build.json)"
+          PLATFORM="$(jq -r '.platform // empty' eas-build.json)"
+          VERSION="$(jq -r '.appVersion // empty' eas-build.json)"
+          VERSION_CODE="$(jq -r '.appBuildVersion // empty' eas-build.json)"
+          if [ "$STATUS" != "FINISHED" ] || [ "$PLATFORM" != "ANDROID" ]; then
+            echo "::error::Build is not a finished Android build (status=$STATUS, platform=$PLATFORM)."
+            exit 1
+          fi
+          if [ "$VERSION" != "1.3.3" ] || [ "$VERSION_CODE" != "12" ]; then
+            echo "::error::Unexpected app version $VERSION ($VERSION_CODE)."
+            exit 1
+          fi
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Submit to Google Play internal testing
+        shell: bash
+        env:
+          BUILD_ID: ${{ steps.build.outputs.build_id }}
+        run: |
+          eas submit --platform android --profile production --id "$BUILD_ID" \
+            --non-interactive --wait --verbose 2>&1 | tee eas-submit.log
+          eas submit:list --platform android --limit 1 --json > eas-submit.json
+
+      - name: Upload submission record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stokdas-1.3.3-google-play-submission
+          path: |
+            eas-build.json
+            eas-submit.log
+            eas-submit.json
+          if-no-files-found: warn
+          retention-days: 30
