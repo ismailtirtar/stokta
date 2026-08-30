@@ -84,15 +84,27 @@ jobs:
           PLATFORM="$(jq -r '.platform // empty' eas-build.json)"
           VERSION="$(jq -r '.appVersion // empty' eas-build.json)"
           VERSION_CODE="$(jq -r '.appBuildVersion // empty' eas-build.json)"
+          APPLICATION_ID="$(jq -r '.appIdentifier // empty' eas-build.json)"
+          EXPECTED_VERSION="$(jq -r '.version' package.json)"
+          EXPECTED_APPLICATION_ID="$(jq -r '.expo.android.package' app.json)"
           if [ "$STATUS" != "FINISHED" ] || [ "$PLATFORM" != "ANDROID" ]; then
             echo "::error::Build is not a finished Android build (status=$STATUS, platform=$PLATFORM)."
             exit 1
           fi
-          if [ "$VERSION" != "1.3.3" ] || [ "$VERSION_CODE" != "12" ]; then
-            echo "::error::Unexpected app version $VERSION ($VERSION_CODE)."
+          if [ "$VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Unexpected app version $VERSION (expected $EXPECTED_VERSION)."
+            exit 1
+          fi
+          if [ "$APPLICATION_ID" != "$EXPECTED_APPLICATION_ID" ]; then
+            echo "::error::Unexpected Android application ID $APPLICATION_ID (expected $EXPECTED_APPLICATION_ID)."
+            exit 1
+          fi
+          if ! [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid Android version code $VERSION_CODE."
             exit 1
           fi
           echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
 
       - name: Submit to Google Play internal testing
         shell: bash
