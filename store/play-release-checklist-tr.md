@@ -35,7 +35,7 @@
 ## Play Console için önerilen beyanlar
 
 - Reklam içeriyor mu? `Hayır`
-- Hedef kitle: `18 yaş ve üzeri / iş kullanıcıları`
+- Hedef kitle: `16-17 ve 18 yaş ve üzeri / iş kullanıcıları`
 - Haber uygulaması mı? `Hayır`
 - Sağlık uygulaması mı? `Hayır`
 - Finansal özellikler içeriyor mu? `Hayır`
