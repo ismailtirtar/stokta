@@ -1,4 +1,4 @@
 # GitHub Actions build request
 mode=build
-reason=google-play-internal-submit
-requested_at=2026-08-30T21:00:48.844Z
+reason=google-play-internal-splash-fix
+requested_at=2026-08-30T21:36:10Z
