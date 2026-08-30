@@ -19,12 +19,14 @@
     "android": {
       "package": "com.ismailtirtar.stokta",
       "versionCode": 12,
+      "allowBackup": false,
       "softwareKeyboardLayoutMode": "resize",
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "com.google.android.gms.permission.AD_ID"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
