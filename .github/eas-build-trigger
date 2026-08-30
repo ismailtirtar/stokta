@@ -1,4 +1,4 @@
 # GitHub Actions build request
 mode=build
-reason=google-play-internal-security-and-splash-fix
-requested_at=2026-08-30T21:40:50Z
+reason=google-play-internal-final-release-candidate
+requested_at=2026-08-30T21:44:05Z
