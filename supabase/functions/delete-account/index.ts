@@ -91,6 +91,25 @@ Deno.serve(async (req: Request) => {
     }
 
     if (caller.role === "admin") {
+      const { data: requiresCancellation, error: cancellationCheckError } = await admin.rpc(
+        "service_google_play_subscription_requires_cancellation",
+        { p_organization_id: caller.organization_id },
+      );
+      if (cancellationCheckError) {
+        console.error("Google Play cancellation check failed", {
+          code: typeof cancellationCheckError.code === "string"
+            ? cancellationCheckError.code
+            : "unknown",
+        });
+        return json(503, { error: "Google Play abonelik durumu doğrulanamadı" });
+      }
+      if (requiresCancellation) {
+        return json(409, {
+          error: "İşletmeyi silmeden önce Google Play aboneliğini iptal edin ve Stokdaş'ta satın alımları geri yükleyin",
+          code: "ACTIVE_GOOGLE_PLAY_SUBSCRIPTION",
+        });
+      }
+
       const { data: profiles, error: profilesError } = await admin
         .from("profiles")
         .select("id,is_platform_operator")

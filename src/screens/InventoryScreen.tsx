@@ -12,6 +12,7 @@ import ContentReportModal from "../components/ContentReportModal";
 import ForcedPasswordChange from "../components/ForcedPasswordChange";
 import PlatformModal from "../components/PlatformModal";
 import SafetyCenterModal from "../components/SafetyCenterModal";
+import SubscriptionModal from "../components/SubscriptionModal";
 import TermsModal from "../components/TermsModal";
 import { CURRENT_UGC_TERMS_VERSION } from "../lib/ugc";
 import type {
@@ -54,6 +55,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
   const [movementModal, setMovementModal] = useState(false);
   const [coworkerModal, setCoworkerModal] = useState(false);
   const [accountModal, setAccountModal] = useState(false);
+  const [subscriptionModal, setSubscriptionModal] = useState(false);
   const [platformModal, setPlatformModal] = useState(false);
   const [safetyCenterModal, setSafetyCenterModal] = useState(false);
   const [safetyCenterScope, setSafetyCenterScope] = useState<"organization" | "platform">("organization");
@@ -200,7 +202,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
 
   function requireWritable() {
     if (canWrite) return true;
-    Alert.alert("İşletme hesabı işlem yapmaya kapalı", "Kiralama durumunu yenilemek için Stokdaş yöneticisiyle iletişime geçin.");
+    Alert.alert("İşletme hesabı işlem yapmaya kapalı", "Abonelik durumunu yenilemek için işletme yöneticisinin Google Play ödeme ekranını kullanması gerekir.");
     return false;
   }
 
@@ -229,6 +231,12 @@ export default function InventoryScreen({ session }: { session: Session }) {
   function reviewTerms() {
     setAccountModal(false);
     setReviewTermsModal(true);
+  }
+
+  function openSubscription() {
+    if (!isAdmin || isPlatformOperator || !organizationId) return;
+    setAccountModal(false);
+    setSubscriptionModal(true);
   }
 
   function openSafetyCenter(scope: "organization" | "platform") {
@@ -403,7 +411,18 @@ export default function InventoryScreen({ session }: { session: Session }) {
             </View>
           </View>
           {error ? <Pressable style={styles.errorBanner} onPress={() => void loadData()}><Text style={styles.errorText}>{error}</Text><Text style={styles.retry}>Tekrar dene</Text></Pressable> : null}
-          {!canWrite ? <View style={styles.subscriptionBanner}><Text style={styles.subscriptionBannerTitle}>Kiralama durumu: {subscriptionLabel}</Text><Text style={styles.subscriptionBannerText}>Veriler görüntülenebilir; stok ve kullanıcı değişiklikleri geçici olarak kapalıdır.</Text></View> : null}
+          {!canWrite ? <View style={styles.subscriptionBanner}>
+            <Text style={styles.subscriptionBannerTitle}>Abonelik durumu: {subscriptionLabel}</Text>
+            <Text style={styles.subscriptionBannerText}>Veriler görüntülenebilir; stok ve kullanıcı değişiklikleri geçici olarak kapalıdır.</Text>
+            {isAdmin && !isPlatformOperator ? <Pressable
+              style={styles.subscriptionAction}
+              onPress={openSubscription}
+              accessibilityRole="button"
+              accessibilityLabel="Google Play aboneliğini yenile"
+            >
+              <Text style={styles.subscriptionActionText}>{["Ödeme bekliyor", "Askıda"].includes(subscriptionLabel) ? "Google Play'de yönet" : "Google Play'den yenile"}</Text>
+            </Pressable> : null}
+          </View> : null}
           <View style={styles.statsGrid}>
             <StatCard label="TOPLAM ÜRÜN" value={products.length} caption="Aktif ürün çeşidi" tone="green" />
             <StatCard label="AZALAN STOK" value={lowCount} caption={criticalCount ? `${criticalCount} ürün tükendi` : "Kontrol bekliyor"} tone="amber" />
@@ -421,7 +440,17 @@ export default function InventoryScreen({ session }: { session: Session }) {
       {isAdmin ? <ProductEditor visible={productModal} editing={editing} draft={draft} setDraft={setDraft} saving={saving} onClose={() => setProductModal(false)} onSave={saveProduct} /> : null}
       <MovementEditor visible={movementModal} product={selectedProduct} type={movementType} setType={setMovementType} quantity={quantity} setQuantity={setQuantity} note={note} setNote={setNote} saving={saving} onClose={() => setMovementModal(false)} onSave={saveMovement} />
       {isAdmin ? <CoworkerEditor visible={coworkerModal} name={coworkerName} setName={setCoworkerName} username={coworkerUsername} setUsername={setCoworkerUsername} email={coworkerEmail} setEmail={setCoworkerEmail} password={coworkerPassword} setPassword={setCoworkerPassword} passwordAgain={coworkerPasswordAgain} setPasswordAgain={setCoworkerPasswordAgain} saving={saving} onClose={() => setCoworkerModal(false)} onSave={saveCoworker} /> : null}
-      <AccountModal visible={accountModal} displayName={displayName} username={username} role={role} organizationName={organizationName} subscriptionLabel={subscriptionLabel} isPlatformOperator={isPlatformOperator} saving={saving} onClose={() => setAccountModal(false)} onOpenTerms={reviewTerms} onOpenSafetyCenter={() => openSafetyCenter("organization")} onOpenPlatformSafetyCenter={() => openSafetyCenter("platform")} onSignOut={signOut} onDelete={deleteAccount} />
+      <AccountModal visible={accountModal} displayName={displayName} username={username} role={role} organizationName={organizationName} subscriptionLabel={subscriptionLabel} isPlatformOperator={isPlatformOperator} saving={saving} onClose={() => setAccountModal(false)} onOpenSubscription={openSubscription} onOpenTerms={reviewTerms} onOpenSafetyCenter={() => openSafetyCenter("organization")} onOpenPlatformSafetyCenter={() => openSafetyCenter("platform")} onSignOut={signOut} onDelete={deleteAccount} />
+      {isAdmin && !isPlatformOperator ? <SubscriptionModal
+        visible={subscriptionModal}
+        userId={session.user.id}
+        organizationId={organizationId}
+        subscriptionLabel={subscriptionLabel}
+        trialEndsAt={trialEndsAt}
+        currentPeriodEnd={currentPeriodEnd}
+        onClose={() => setSubscriptionModal(false)}
+        onSubscriptionUpdated={() => loadData(true)}
+      /> : null}
       {isPlatformOperator ? <PlatformModal visible={platformModal} onClose={() => setPlatformModal(false)} /> : null}
       {isAdmin || isPlatformOperator ? <SafetyCenterModal scope={safetyCenterScope} visible={safetyCenterModal} onClose={() => setSafetyCenterModal(false)} onModerated={() => void loadData(true)} /> : null}
       <ContentReportModal target={reportTarget} saving={reportSaving} error={reportError} onClose={() => { if (!reportSaving) setReportTarget(null); }} onSubmit={submitReport} />
@@ -521,7 +550,7 @@ const styles = StyleSheet.create({
   platformButton: { height: 36, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#f3a952" }, platformButtonText: { color: "#172820", fontSize: 8, fontWeight: "900" },
   avatar: { width: 43, height: 43, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#f3a952" }, avatarText: { color: "#172820", fontSize: 12, fontWeight: "900" },
   errorBanner: { marginHorizontal: 14, marginTop: 13, padding: 12, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 11, backgroundColor: "#fae9e5" }, errorText: { flex: 1, color: "#92483f", fontSize: 11 }, retry: { color: "#7e3c34", fontSize: 10, fontWeight: "900" },
-  subscriptionBanner: { marginHorizontal: 14, marginTop: 13, padding: 12, borderWidth: 1, borderColor: "#efd5ad", borderRadius: 11, backgroundColor: "#fff4df" }, subscriptionBannerTitle: { color: "#8d5a16", fontSize: 11, fontWeight: "900" }, subscriptionBannerText: { marginTop: 4, color: "#9a713d", fontSize: 9, lineHeight: 14 },
+  subscriptionBanner: { marginHorizontal: 14, marginTop: 13, padding: 12, borderWidth: 1, borderColor: "#efd5ad", borderRadius: 11, backgroundColor: "#fff4df" }, subscriptionBannerTitle: { color: "#8d5a16", fontSize: 11, fontWeight: "900" }, subscriptionBannerText: { marginTop: 4, color: "#9a713d", fontSize: 9, lineHeight: 14 }, subscriptionAction: { minHeight: 36, marginTop: 9, alignItems: "center", justifyContent: "center", borderRadius: 9, backgroundColor: "#f3a952" }, subscriptionActionText: { color: "#553713", fontSize: 9, fontWeight: "900" },
   statsGrid: { marginTop: -1, padding: 14, flexDirection: "row", gap: 9, backgroundColor: "#f4f5f1" }, statCard: { flex: 1, minHeight: 111, padding: 13, borderWidth: 1, borderColor: "#e3e6e1", borderRadius: 14, backgroundColor: "#fff" }, statDot: { width: 9, height: 9, marginBottom: 10, borderRadius: 5 }, stat_green: { backgroundColor: "#3f936d" }, stat_amber: { backgroundColor: "#e9a34d" }, stat_blue: { backgroundColor: "#5f8da5" }, statLabel: { color: "#848c87", fontSize: 8, fontWeight: "900", letterSpacing: .6 }, statValue: { marginTop: 7, color: "#18231e", fontSize: 25, fontWeight: "800" }, statCaption: { marginTop: 3, color: "#929994", fontSize: 8, lineHeight: 12 },
   sectionHead: { paddingHorizontal: 16, paddingTop: 13, paddingBottom: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" }, eyebrow: { marginBottom: 3, color: "#848c87", fontSize: 8, fontWeight: "900", letterSpacing: 1.1 }, sectionTitle: { color: "#1b2721", fontSize: 20, fontWeight: "800" },
   lowFilter: { paddingHorizontal: 11, paddingVertical: 8, borderWidth: 1, borderColor: "#dbe0db", borderRadius: 9, backgroundColor: "#fff" }, lowFilterActive: { borderColor: "#c6dfd2", backgroundColor: "#e7f3ed" }, lowFilterText: { color: "#65706a", fontSize: 10, fontWeight: "800" }, lowFilterTextActive: { color: "#277053" },

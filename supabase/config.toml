@@ -36,3 +36,6 @@ verify_jwt = true
 
 [functions.manage-businesses]
 verify_jwt = true
+
+[functions.verify-play-subscription]
+verify_jwt = true

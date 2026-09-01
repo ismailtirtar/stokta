@@ -23,6 +23,7 @@ type Props = {
   isPlatformOperator: boolean;
   saving: boolean;
   onClose: () => void;
+  onOpenSubscription: () => void;
   onOpenTerms: () => void;
   onOpenSafetyCenter: () => void;
   onOpenPlatformSafetyCenter: () => void;
@@ -40,6 +41,7 @@ export default function AccountModal({
   isPlatformOperator,
   saving,
   onClose,
+  onOpenSubscription,
   onOpenTerms,
   onOpenSafetyCenter,
   onOpenPlatformSafetyCenter,
@@ -60,6 +62,8 @@ export default function AccountModal({
 
   const isAdmin = role === "admin";
   const expectedConfirmation = isAdmin ? "STOKDAŞ" : username;
+  const needsGooglePlayCancellation = isAdmin
+    && ["Aktif", "Ödeme bekliyor", "Askıda"].includes(subscriptionLabel);
   const canDelete = confirmation.trim() === expectedConfirmation
     && currentPassword.length > 0
     && currentPassword.length <= 72
@@ -103,6 +107,15 @@ export default function AccountModal({
                 <View><Text style={styles.menuTitle}>Kullanım koşulları</Text><Text style={styles.menuCaption}>İçerik ve güvenli kullanım kurallarını incele</Text></View>
                 <Text style={styles.chevron}>›</Text>
               </Pressable>
+              {isAdmin && !isPlatformOperator ? <Pressable
+                style={styles.menuItem}
+                onPress={onOpenSubscription}
+                accessibilityRole="button"
+                accessibilityLabel="Google Play aboneliğini yönet"
+              >
+                <View><Text style={styles.menuTitle}>Abonelik ve ödeme</Text><Text style={styles.menuCaption}>Google Play aboneliğini başlat veya geri yükle</Text></View>
+                <Text style={styles.chevron}>›</Text>
+              </Pressable> : null}
               {isAdmin ? <Pressable
                 style={styles.menuItem}
                 onPress={onOpenSafetyCenter}
@@ -130,7 +143,7 @@ export default function AccountModal({
                 <Text style={styles.dangerChevron}>›</Text>
               </Pressable> : null}
 
-              <Text style={styles.version}>Stokdaş · Sürüm 1.3.3</Text>
+              <Text style={styles.version}>Stokdaş · Sürüm 1.3.4</Text>
             </ScrollView>
           ) : null}
 
@@ -146,6 +159,21 @@ export default function AccountModal({
                     : "Adınız, kullanıcı adınız ve giriş hesabınız kalıcı olarak silinir. Ortak stok geçmişinin tutarlılığı için eski hareketleriniz yalnızca “Silinmiş kullanıcı” adıyla anonim olarak kalır."}
                 </Text>
               </View>
+              {needsGooglePlayCancellation ? <View style={styles.billingWarningBox}>
+                <Text style={styles.billingWarningTitle}>Önce Google Play yenilemesini kapatın</Text>
+                <Text style={styles.billingWarningText}>
+                  İşletmeyi veya yönetici hesabını silmek Google Play aboneliğini otomatik olarak iptal etmez. Etkin bir Google Play aboneliğiniz varsa önce otomatik yenilemeyi Google Play'de iptal edin; sonra Stokdaş'ta satın alımları geri yükleyerek durumun güncellendiğini doğrulayın. Aksi hâlde ücret alınmaya devam edebilir.
+                </Text>
+                <Pressable
+                  style={styles.billingWarningButton}
+                  onPress={onOpenSubscription}
+                  disabled={saving}
+                  accessibilityRole="button"
+                  accessibilityLabel="Google Play aboneliğini iptal etmek ve durumu geri yüklemek için abonelik ekranını aç"
+                >
+                  <Text style={styles.billingWarningButtonText}>Abonelik ve ödemeye git</Text>
+                </Pressable>
+              </View> : null}
               <Text style={styles.confirmLabel}>Devam etmek için aşağıya {expectedConfirmation} yazın</Text>
               <TextInput
                 style={styles.confirmInput}
@@ -184,10 +212,10 @@ export default function AccountModal({
 function PrivacyPolicy() {
   return (
     <ScrollView style={styles.policy} showsVerticalScrollIndicator={false}>
-      <Text style={styles.policyDate}>Yürürlük tarihi: 29 Ağustos 2026</Text>
+      <Text style={styles.policyDate}>Yürürlük tarihi: 1 Eylül 2026</Text>
       <PolicySection title="Veri sorumlusu">Stokdaş uygulaması İsmail Tırtar tarafından işletilir. Hizmet, kiracı işletmelerin stok ve kullanıcı verilerini birbirinden ayrılmış çalışma alanlarında yönetmesini sağlar.</PolicySection>
-      <PolicySection title="İşlenen veriler">İşletme adı; kullanıcı adı, ad ve soyad, doğrulanmış kurtarma e-postası, hesap rolü, oturum ve güvenlik kayıtları; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kullanım koşullarının sürümü ve kabul zamanı da kaydedilir. Bir içerik veya kullanıcı bildirildiğinde hedef kayıt, neden, isteğe bağlı açıklama, bildiren hesap, zaman ve yöneticinin moderasyon işlemi tutulur. Kötüye kullanımı sınırlandırmak için ağ adresinin geri döndürülemeyen özeti güvenlik kontrollerinde kullanılabilir. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</PolicySection>
-      <PolicySection title="Amaç ve paylaşım">Veriler yalnızca kimlik doğrulama, e-posta doğrulama, hesap kurtarma, işletme hesabı açma, ortak stok takibi, kiralama yönetimi, yetkilendirme, güvenlik, içerik moderasyonu ve işlem geçmişi amaçlarıyla kullanılır. İşletme içindeki içerik ve çalışan bildirimleri yalnızca o işletmenin yöneticilerine; işletme yöneticileri hakkındaki bildirimler ise yalnızca yetkili platform operatörlerine gösterilir. Reklam, veri satışı veya kullanıcı takibi yapılmaz. Altyapı sağlayıcısı olarak Supabase kullanılır; veriler Frankfurt bölgesindeki sunucularda tutulur.</PolicySection>
+      <PolicySection title="İşlenen veriler">İşletme adı; kullanıcı adı, ad ve soyad, doğrulanmış kurtarma e-postası, hesap rolü, oturum ve güvenlik kayıtları; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kullanım koşullarının sürümü ve kabul zamanı da kaydedilir. Google Play aboneliğinde ürün ve plan, abonelik durumu ve dönemi doğrulanıp saklanır; satın alma belirteci ile sipariş referansının yalnızca geri döndürülemez özetleri erişim doğrulaması, dolandırıcılığın önlenmesi ve muhasebe kayıtları için tutulur. Kart ve ödeme yöntemi bilgileri Stokdaş'a aktarılmaz. Bir içerik veya kullanıcı bildirildiğinde hedef kayıt, neden, isteğe bağlı açıklama, bildiren hesap, zaman ve yöneticinin moderasyon işlemi tutulur. Kötüye kullanımı sınırlandırmak için ağ adresinin geri döndürülemeyen özeti güvenlik kontrollerinde kullanılabilir. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</PolicySection>
+      <PolicySection title="Amaç ve paylaşım">Veriler yalnızca kimlik doğrulama, e-posta doğrulama, hesap kurtarma, işletme hesabı açma, ortak stok takibi, abonelik ve ödeme doğrulaması, yetkilendirme, güvenlik, içerik moderasyonu ve işlem geçmişi amaçlarıyla kullanılır. İşletme içindeki içerik ve çalışan bildirimleri yalnızca o işletmenin yöneticilerine; işletme yöneticileri hakkındaki bildirimler ise yalnızca yetkili platform operatörlerine gösterilir. Abonelik işlemi ve doğrulaması için gerekli bilgiler Google Play ile paylaşılır; ödeme Google Play tarafından yürütülür. Reklam, veri satışı veya kullanıcı takibi yapılmaz. Altyapı sağlayıcısı olarak Supabase kullanılır; veriler Frankfurt bölgesindeki sunucularda tutulur.</PolicySection>
       <PolicySection title="Saklama ve silme">Veriler hesap veya işletme çalışma alanı silinene kadar saklanır. Moderasyon bildirimleri, kararların tutarlılığı ve kötüye kullanımın önlenmesi için hedef içerik kaldırıldıktan veya bildirim çözüldükten sonra da işletme çalışma alanı silinene kadar saklanabilir. Çalışan hesabı silindiğinde profil bilgileri kaldırılır ve eski hareketler anonimleştirilir. İşletme yöneticisi silme işlemini başlattığında yalnızca kendi işletmesinin verileri ve hesapları kalıcı olarak kaldırılır.</PolicySection>
       <PolicySection title="Güvenlik">Aktarım sırasında HTTPS kullanılır. Her kayıt işletme kimliğiyle ayrılır; veritabanında satır düzeyi güvenlik ve rol tabanlı yetkilendirme uygulanır. Bir işletme diğer işletmenin ürün, hareket veya kullanıcı verilerini okuyamaz. Hizmet rolü anahtarı mobil uygulamaya eklenmez.</PolicySection>
       <PolicySection title="Haklarınız">Hesabınızı bu ekrandaki “Hesabımı sil” seçeneğiyle silebilirsiniz. İşletme yöneticisi yalnızca kendi işletmesinin çalışma alanını kaldırabilir. Platform yöneticisi hesabı güvenlik nedeniyle uygulama içinden silinemez. Gizlilik ve veri talepleri için tirtarismail@gmail.com adresine ulaşabilirsiniz.</PolicySection>
@@ -237,6 +265,11 @@ const styles = StyleSheet.create({
   warningBox: { padding: 15, borderWidth: 1, borderColor: "#efd2cc", borderRadius: 13, backgroundColor: "#fae9e5" },
   warningTitle: { color: "#943f36", fontSize: 13, fontWeight: "900" },
   warningText: { marginTop: 7, color: "#8f5149", fontSize: 10, lineHeight: 16 },
+  billingWarningBox: { marginTop: 10, padding: 15, borderWidth: 1, borderColor: "#efd5ad", borderRadius: 13, backgroundColor: "#fff4df" },
+  billingWarningTitle: { color: "#8d5a16", fontSize: 12, fontWeight: "900" },
+  billingWarningText: { marginTop: 7, color: "#8b6b40", fontSize: 10, lineHeight: 16 },
+  billingWarningButton: { minHeight: 40, marginTop: 10, alignItems: "center", justifyContent: "center", borderRadius: 9, backgroundColor: "#f3a952" },
+  billingWarningButtonText: { color: "#553713", fontSize: 9, fontWeight: "900" },
   confirmLabel: { marginTop: 18, marginBottom: 7, color: "#59645e", fontSize: 10, fontWeight: "800" },
   confirmInput: { height: 48, paddingHorizontal: 13, borderWidth: 1, borderColor: "#d8ddd8", borderRadius: 11, backgroundColor: "#fff", color: "#17201d", fontSize: 13 },
   deleteButton: { height: 50, marginTop: 14, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#ad4f44" },
