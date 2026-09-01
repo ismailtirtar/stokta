@@ -487,7 +487,6 @@ function findMonthlyBasePlan(product: ProductSubscription | undefined) {
   if (!product || product.platform !== "android") return null;
   return product.subscriptionOffers.find((offer) => (
     offer.basePlanIdAndroid === PLAY_SUBSCRIPTION_BASE_PLAN_ID
-    && offer.id === PLAY_SUBSCRIPTION_BASE_PLAN_ID
     && Boolean(offer.offerTokenAndroid)
   )) ?? null;
 }
