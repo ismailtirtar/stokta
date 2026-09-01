@@ -1,4 +1,4 @@
 # GitHub Actions build request
 mode=build
-reason=google-play-billing-1.3.4-release-candidate
-requested_at=2026-09-01T06:59:23Z
+reason=google-play-billing-1.3.4-lockfile-fixed
+requested_at=2026-09-01T18:04:20Z
