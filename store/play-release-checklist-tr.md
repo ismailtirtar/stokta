@@ -1,4 +1,4 @@
-# Stokdaş 1.3.3 (12) — Google Play yayın kontrol listesi
+# Stokdaş 1.3.4 — Google Play yayın kontrol listesi
 
 ## Hazır olanlar
 
@@ -15,21 +15,36 @@
 - [x] İşletme yöneticileri için bildirim inceleme ve ölçülü moderasyon işlemleri eklendi
 - [x] Kullanım koşulları ve gizlilik politikası UGC/bildirim/moderasyon verilerini açıklar
 - [x] Çalışan ve yönetici için kalıcı hesap/veri silme akışı eklendi
-- [x] Supabase silme işlevi JWT doğrulamasıyla canlıya alındı
+- [x] Supabase silme ve Google Play satın alma doğrulama işlevleri JWT doğrulamasıyla canlıya alındı
 - [x] Uygulama içinden güvenli işletme kaydı ve 14 günlük deneme akışı eklendi
-- [x] TypeScript ve Android JS üretim dışa aktarımı başarılı
+- [x] Google Play Billing izni ve Play Billing Library 9.1.0 AAB manifestinde doğrulandı
+- [x] TypeScript ve Expo bağımlılık uyumluluk kontrolleri başarılı
+- [x] İmzalı Stokdaş 1.3.4 (18) AAB'si doğrulandı
+- [x] Stokdaş 1.3.4 (18) Google Play dahili test kanalında etkinleştirildi
 
-## Kullanıcıdan/Play Console'dan gerekenler
+## Google Play ve ödeme kurulumu
 
-- [ ] Google Play Developer hesabı hazır olmalı
+- [x] Google Play Developer hesabı ve Stokdaş uygulama kaydı hazır
+- [ ] Mevcut Google ödeme profili geliştirici hesabına açık kullanıcı onayıyla bağlanmalı
+- [ ] Google Cloud Android Publisher servis hesabı ve JSON anahtarı oluşturulmalı
+- [ ] Servis hesabına Play Console'da finansal veri görüntüleme ile sipariş/abonelik yönetme izinleri verilmeli
+- [ ] Servis hesabı JSON'u EAS ve Supabase `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret'ına güvenli biçimde eklenmeli
+- [ ] `stokdas_pro` abonelik ürünü ile `monthly` otomatik yenilenen base plan oluşturulup etkinleştirilmeli
+- [ ] Aylık TRY fiyatı ve satış yapılacak ülkeler kesinleştirilmeli
+- [ ] Dahili test hesabı ayrıca License Tester listesine eklenmeli
+- [ ] Google Play RTDN / Pub/Sub alıcısı, mesaj tekrar önleme ve yaşam döngüsü eşitlemesi tamamlanmalı
+- [ ] Expo IAP 5.5.0 foreground/reconnect düzeltmesini içeren sonraki AAB dahili teste yüklenmeli
+- [ ] İlk satın alma, pending, restore, yenileme, iptal, grace/hold/recovery, refund/revoke ve hesap silme yarış testleri geçmeli
+- [ ] RTDN testleri tamamlanana kadar yalnız lisans test hesapları kullanılmalı; gerçek ücret açılmamalı
+
+## Mağaza beyanları
+
 - [ ] Geliştirici destek e-postası kesinleştirilmeli
 - [ ] Gizlilik ve hesap silme HTML sayfası herkese açık, sabit bir HTTPS adresinde yayımlanmalı
 - [ ] Temiz uygulama ekran görüntüleri alınmalı; şifre veya kişisel veri görünmemeli
-- [ ] Play Console'da uygulama oluşturulmalı: Uygulama / Ücretsiz / varsayılan dil Türkçe
 - [ ] Uygulama erişimi için inceleme hesabı oluşturulmalı; ilk girişte Kullanım Koşulları kabul edilerek ürün/hareket bildirme ve yönetici inceleme akışı doğrulanmalı
-- [ ] Veri Güvenliği formunda kullanıcı tarafından oluşturulan içerik, içerik bildirimi ve moderasyon kayıtlarının işlevsellik ile güvenlik/uygunluk amaçları doğru beyan edilmeli
+- [ ] Veri Güvenliği formunda kullanıcı tarafından oluşturulan içerik, içerik bildirimi, moderasyon kayıtları ve satın alma geçmişi doğru beyan edilmeli
 - [ ] İçerik derecelendirmesi, hedef kitle, reklam ve haber uygulaması beyanları doldurulmalı
-- [ ] 1.3.3 (12) AAB'si EAS Build ile oluşturulmalı ve Play Console iç test sürümüne yüklenmeli
 - [ ] Kapalı test şartı uygulanıyorsa test tamamlanmalı
 
 ## Play Console için önerilen beyanlar
@@ -38,8 +53,8 @@
 - Hedef kitle: `16-17 ve 18 yaş ve üzeri / iş kullanıcıları`
 - Haber uygulaması mı? `Hayır`
 - Sağlık uygulaması mı? `Hayır`
-- Finansal özellikler içeriyor mu? `Hayır`
+- Finansal özellikler içeriyor mu? `Hayır — ancak Google Play satın alma geçmişi abonelik sağlamak için işlenir`
 - Uygulama erişimi kısıtlı mı? `Evet — giriş bilgisi gerekli`
 - Veri silme: `Uygulama içinde ve web kaynağı üzerinden mevcut`
 
-31 Ağustos 2026'dan itibaren yeni uygulama ve güncellemeler Android 16 / API 36'yı hedeflemelidir. Stokdaş, Expo SDK 54 ile bunu karşılar. Kaynak: [Google Play hedef API şartı](https://support.google.com/googleplay/android-developer/answer/11926878?hl=en).
+1 Eylül 2026 itibarıyla Google Play Billing kullanan yeni uygulama ve güncellemeler en az Play Billing Library 8 içermelidir. Stokdaş AAB'sinde 9.1.0 doğrulandı. Android hedef API 36'dır.
