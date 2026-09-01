@@ -21,6 +21,7 @@
 - [x] TypeScript ve Expo bağımlılık uyumluluk kontrolleri başarılı
 - [x] İmzalı Stokdaş 1.3.4 (18) AAB'si doğrulandı
 - [x] Stokdaş 1.3.4 (18) Google Play dahili test kanalında etkinleştirildi
+- [x] Expo IAP 5.5.0 foreground/reconnect uzlaştırmasını içeren Stokdaş 1.3.4 (19) AAB'si üretildi; bundletool, Billing 9.1.0, sürüm kodu ve imza sertifikası doğrulandı
 
 ## Google Play ve ödeme kurulumu
 
@@ -32,8 +33,9 @@
 - [ ] `stokdas_pro` abonelik ürünü ile `monthly` otomatik yenilenen base plan oluşturulup etkinleştirilmeli
 - [ ] Aylık TRY fiyatı ve satış yapılacak ülkeler kesinleştirilmeli
 - [ ] Dahili test hesabı ayrıca License Tester listesine eklenmeli
-- [ ] Google Play RTDN / Pub/Sub alıcısı, mesaj tekrar önleme ve yaşam döngüsü eşitlemesi tamamlanmalı
-- [ ] Expo IAP 5.5.0 foreground/reconnect düzeltmesini içeren sonraki AAB dahili teste yüklenmeli
+- [ ] Google Play RTDN / Pub/Sub alıcısı, mesaj tekrar önleme ve yaşam döngüsü eşitlemesi tamamlanmalı; review-ready taslak canlıya alınmadı
+- [ ] Mevcut satın alma doğrulama ve hesap silme Edge akışları durable ACK/deletion-lease protokolüne taşınmalı; recovery/refund worker, gizlilik metni ve branch yarış testleri tamamlanmalı
+- [ ] Stokdaş 1.3.4 (19) AAB'si Play Console genel yükleme hatası giderildikten sonra dahili teste yüklenmeli (paket kitaplığına kaydolmadı; kod 18 etkin)
 - [ ] İlk satın alma, pending, restore, yenileme, iptal, grace/hold/recovery, refund/revoke ve hesap silme yarış testleri geçmeli
 - [ ] RTDN testleri tamamlanana kadar yalnız lisans test hesapları kullanılmalı; gerçek ücret açılmamalı
 
