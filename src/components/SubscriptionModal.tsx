@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Linking,
   Modal,
   Platform,
@@ -43,6 +44,7 @@ type VerificationResponse = {
 type ScreenState = "idle" | "launching" | "verifying" | "restoring" | "pending" | "success";
 
 const PURCHASE_REVERIFY_TTL_MS = 30_000;
+const AUTOMATIC_RECONCILE_TTL_MS = 60_000;
 
 export default function SubscriptionModal({
   visible,
@@ -87,7 +89,7 @@ function NativeSubscriptionModal({
   const purchaseHandlerRef = useRef<((purchase: Purchase) => Promise<void>) | null>(null);
   const recentlyProcessedPurchaseHashesRef = useRef(new Map<string, number>());
   const processingPurchaseHashesRef = useRef(new Set<string>());
-  const reconciledForVisibleSessionRef = useRef(false);
+  const lastAutomaticReconciliationRef = useRef(0);
   const onSubscriptionUpdatedRef = useRef(onSubscriptionUpdated);
   onSubscriptionUpdatedRef.current = onSubscriptionUpdated;
 
@@ -146,7 +148,7 @@ function NativeSubscriptionModal({
   );
   const basePlanOffer = useMemo(() => findMonthlyBasePlan(playSubscription), [playSubscription]);
   const localizedPrice = useMemo(() => {
-    const phases = basePlanOffer?.pricingPhases.pricingPhaseList ?? [];
+    const phases = basePlanOffer?.pricingPhasesAndroid?.pricingPhaseList ?? [];
     return phases.at(-1)?.formattedPrice ?? playSubscription?.displayPrice ?? "";
   }, [basePlanOffer, playSubscription]);
 
@@ -232,22 +234,33 @@ function NativeSubscriptionModal({
   }, [finishTransaction]);
   purchaseHandlerRef.current = processPurchase;
 
-  useEffect(() => {
-    if (!visible) {
-      reconciledForVisibleSessionRef.current = false;
-      return;
-    }
+  const reconcileAvailablePurchases = useCallback(async (showError: boolean) => {
     if (!connected || Platform.OS !== "android") return;
+    const now = Date.now();
+    if (now - lastAutomaticReconciliationRef.current < AUTOMATIC_RECONCILE_TTL_MS) return;
+    lastAutomaticReconciliationRef.current = now;
+    try {
+      await getAvailablePurchases({ includeSuspendedAndroid: true });
+    } catch (restoreError) {
+      if (showError) handleIapError({ message: errorMessage(restoreError) });
+    }
+  }, [connected, getAvailablePurchases, handleIapError]);
+
+  useEffect(() => {
+    if (!connected || Platform.OS !== "android") return;
+    void reconcileAvailablePurchases(visible);
+    const appStateSubscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") void reconcileAvailablePurchases(false);
+    });
+    return () => appStateSubscription.remove();
+  }, [connected, reconcileAvailablePurchases, visible]);
+
+  useEffect(() => {
+    if (!visible || !connected || Platform.OS !== "android") return;
     setNativeUnavailable(false);
     setError("");
     void fetchSubscriptionProducts();
-
-    if (!reconciledForVisibleSessionRef.current) {
-      reconciledForVisibleSessionRef.current = true;
-      void getAvailablePurchases({ includeSuspendedAndroid: true })
-        .catch((restoreError: unknown) => handleIapError({ message: errorMessage(restoreError) }));
-    }
-  }, [connected, fetchSubscriptionProducts, getAvailablePurchases, handleIapError, visible]);
+  }, [connected, fetchSubscriptionProducts, visible]);
 
   useEffect(() => {
     for (const purchase of availablePurchases) {
@@ -265,7 +278,7 @@ function NativeSubscriptionModal({
         return;
       }
     }
-    if (!basePlanOffer?.offerToken) {
+    if (!basePlanOffer?.offerTokenAndroid) {
       setError("Aylık abonelik şu anda Google Play'de kullanılamıyor. Lütfen biraz sonra yeniden deneyin.");
       return;
     }
@@ -285,7 +298,7 @@ function NativeSubscriptionModal({
             skus: [PLAY_SUBSCRIPTION_PRODUCT_ID],
             subscriptionOffers: [{
               sku: PLAY_SUBSCRIPTION_PRODUCT_ID,
-              offerToken: basePlanOffer.offerToken,
+              offerToken: basePlanOffer.offerTokenAndroid,
             }],
             obfuscatedAccountId,
             obfuscatedProfileId,
@@ -422,9 +435,9 @@ function NativeSubscriptionModal({
             ) : null}
 
             {canStartNewPurchase ? <Pressable
-              style={[styles.primaryButton, (busy || nativeUnavailable || productLoading || !basePlanOffer?.offerToken) && styles.disabled]}
+              style={[styles.primaryButton, (busy || nativeUnavailable || productLoading || !basePlanOffer?.offerTokenAndroid) && styles.disabled]}
               onPress={() => void startPurchase()}
-              disabled={busy || nativeUnavailable || productLoading || !basePlanOffer?.offerToken}
+              disabled={busy || nativeUnavailable || productLoading || !basePlanOffer?.offerTokenAndroid}
               accessibilityRole="button"
               accessibilityLabel={localizedPrice ? `${localizedPrice} aylık Stokdaş Pro aboneliğini Google Play'den başlat` : "Stokdaş Pro aboneliğini Google Play'den başlat"}
             >
@@ -432,7 +445,7 @@ function NativeSubscriptionModal({
                 ? <ActivityIndicator color="#172820" />
                 : <Text style={styles.primaryButtonText}>{localizedPrice ? `${localizedPrice} / ay ile abone ol` : "Google Play fiyatı yükleniyor"}</Text>}
             </Pressable> : null}
-            {!basePlanOffer?.offerToken && !nativeUnavailable ? <Pressable
+            {!basePlanOffer?.offerTokenAndroid && !nativeUnavailable ? <Pressable
               style={[styles.retryProductsButton, (busy || productLoading) && styles.disabled]}
               onPress={() => void retrySubscriptionProducts()}
               disabled={busy || productLoading}
@@ -472,8 +485,10 @@ function NativeSubscriptionModal({
 
 function findMonthlyBasePlan(product: ProductSubscription | undefined) {
   if (!product || product.platform !== "android") return null;
-  return product.subscriptionOfferDetailsAndroid.find((offer) => (
-    offer.basePlanId === PLAY_SUBSCRIPTION_BASE_PLAN_ID && !offer.offerId && Boolean(offer.offerToken)
+  return product.subscriptionOffers.find((offer) => (
+    offer.basePlanIdAndroid === PLAY_SUBSCRIPTION_BASE_PLAN_ID
+    && offer.id === PLAY_SUBSCRIPTION_BASE_PLAN_ID
+    && Boolean(offer.offerTokenAndroid)
   )) ?? null;
 }
 
