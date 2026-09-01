@@ -22,6 +22,7 @@
 - [x] İmzalı Stokdaş 1.3.4 (18) AAB'si doğrulandı
 - [x] Stokdaş 1.3.4 (18) Google Play dahili test kanalında etkinleştirildi
 - [x] Expo IAP 5.5.0 foreground/reconnect uzlaştırmasını içeren Stokdaş 1.3.4 (19) AAB'si üretildi; bundletool, Billing 9.1.0, sürüm kodu ve imza sertifikası doğrulandı
+- [x] Aylık base plan seçimi sağlamlaştırılmış Stokdaş 1.3.4 (20) AAB'si üretildi; EAS build `776cb3fb-290d-4ba9-adde-3b0b39a4484b`, SHA-256 `32ef0c550103951f8162f9e31f2155f5e997b03ef959ee370cc126a0678414c1`, paket/imza/SDK/manifest kontrolleri geçti
 
 ## Google Play ve ödeme kurulumu
 
@@ -29,13 +30,13 @@
 - [ ] Mevcut Google ödeme profili geliştirici hesabına açık kullanıcı onayıyla bağlanmalı
 - [ ] Google Cloud Android Publisher servis hesabı ve JSON anahtarı oluşturulmalı
 - [ ] Servis hesabına Play Console'da finansal veri görüntüleme ile sipariş/abonelik yönetme izinleri verilmeli
-- [ ] Servis hesabı JSON'u EAS ve Supabase `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret'ına güvenli biçimde eklenmeli
+- [ ] Android Publisher doğrulama hesabı JSON'u yalnız Supabase `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret'ına eklenmeli; EAS gönderimi gerekiyorsa ayrı ve daha dar yetkili bir hesap/anahtar kullanılmalı
 - [ ] `stokdas_pro` abonelik ürünü ile `monthly` otomatik yenilenen base plan oluşturulup etkinleştirilmeli
 - [ ] Aylık TRY fiyatı ve satış yapılacak ülkeler kesinleştirilmeli
 - [ ] Dahili test hesabı ayrıca License Tester listesine eklenmeli
 - [ ] Google Play RTDN / Pub/Sub alıcısı, mesaj tekrar önleme ve yaşam döngüsü eşitlemesi tamamlanmalı; review-ready taslak canlıya alınmadı
 - [ ] Mevcut satın alma doğrulama ve hesap silme Edge akışları durable ACK/deletion-lease protokolüne taşınmalı; recovery/refund worker, gizlilik metni ve branch yarış testleri tamamlanmalı
-- [ ] Stokdaş 1.3.4 (19) AAB'si Play Console genel yükleme hatası giderildikten sonra dahili teste yüklenmeli (paket kitaplığına kaydolmadı; kod 18 etkin)
+- [ ] Stokdaş 1.3.4 (20) AAB'si temiz Play Console taslağına iç AAB dosyası olarak yüklenip dahili testte etkinleştirilmeli (kod 19 genel yükleme hatasıyla paket kitaplığına kaydolmadı; kod 18 etkin)
 - [ ] İlk satın alma, pending, restore, yenileme, iptal, grace/hold/recovery, refund/revoke ve hesap silme yarış testleri geçmeli
 - [ ] RTDN testleri tamamlanana kadar yalnız lisans test hesapları kullanılmalı; gerçek ücret açılmamalı
 
