@@ -3,7 +3,7 @@
     "name": "Stokdaş",
     "slug": "dukkan-stok-takip",
     "owner": "homra",
-    "version": "1.3.2",
+    "version": "1.3.4",
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -13,13 +13,15 @@
     "newArchEnabled": true,
     "android": {
       "package": "com.ismailtirtar.stokta",
-      "versionCode": 10,
+      "versionCode": 18,
+      "allowBackup": false,
       "softwareKeyboardLayoutMode": "resize",
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "com.google.android.gms.permission.AD_ID"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
@@ -35,6 +37,16 @@
       }
     },
     "plugins": [
+      "expo-iap",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#172820",
+          "image": "./assets/icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain"
+        }
+      ],
       "./plugins/withAndroidReleaseOptimization.js"
     ],
     "extra": {

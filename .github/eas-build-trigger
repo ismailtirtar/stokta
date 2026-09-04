@@ -1,0 +1,4 @@
+# GitHub Actions build request
+mode=build
+reason=google-play-base-plan-selection-fix
+requested_at=2026-09-01T23:11:39Z

@@ -41,8 +41,8 @@ Karakter sayısı: 71 / 80.
 
 Uygulama giriş gerektirir. Play Console > Uygulama içeriği > Uygulama erişimi alanında şunlar verilmelidir:
 
-- Kullanıcı adı: gönderimden hemen önce oluşturulacak geçici inceleme hesabı
-- Şifre: gönderimden hemen önce belirlenecek geçici şifre
+- Kullanıcı adı: gönderimden hemen önce oluşturulacak inceleme hesabı
+- Şifre: e-posta doğrulaması ve zorunlu ilk şifre değişikliği önceden tamamlanmış inceleme hesabının kalıcı inceleme şifresi
 - Talimat: “Kullanıcı adı ve şifreyi girip Giriş yap düğmesine dokunun. Hesap çalışan rolündedir; stok giriş/çıkış özellikleri kullanılabilir.”
 
 İnceleme hesabı çalışır durumda kalmalı, süresi dolmamalı ve iki aşamalı doğrulama istememelidir. Gerçek yönetici şifresi kesinlikle paylaşılmamalıdır.
@@ -51,8 +51,8 @@ Uygulama giriş gerektirir. Play Console > Uygulama içeriği > Uygulama erişim
 
 - Geliştirici adı: `İsmail Tırtar`
 - Destek e-postası: `tirtarismail@gmail.com`
-- Gizlilik politikası URL'si: `YAYINLANACAK_GIZLILIK_URLSI_BURAYA`
-- Hesap silme web URL'si: gizlilik sayfasındaki “Hesap silme” bölümüne doğrudan ulaşan herkese açık adres
+- Gizlilik politikası URL'si: `https://stokdas.tirtarhan.chatgpt.site/gizlilik`
+- Hesap silme web URL'si: `https://stokdas.tirtarhan.chatgpt.site/gizlilik#hesap-silme`
 
 ## Görsel dosyalar
 

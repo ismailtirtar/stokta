@@ -37,7 +37,7 @@ Yerel geliştirmede `.env`, EAS Build'de proje ortam değişkenleri kullanılır
 4. Çalışanlar yalnızca bağlı oldukları işletmenin ürünlerini ve hareketlerini görür.
 5. Platform yöneticisi uygulamadaki `İşletmeler` ekranından kiralama süresini etkinleştirebilir, limitleri değiştirebilir veya işletmeyi askıya alabilir.
 
-İşletme yöneticileri kendi işletmelerini uygulamadan kaydedebilir. Çalışan hesapları güvenlik ve işletme üyeliği kontrolü için yalnızca o işletmenin yöneticisi tarafından oluşturulur. Dahili Auth e-postaları uygulama tarafından `<kullanici_adi>@stokta.invalid` biçiminde üretilir ve arayüzde gösterilmez.
+İşletme yöneticileri kendi işletmelerini uygulamadan kaydedebilir. Yeni işletme ve çalışan hesapları doğrulanmış kurtarma e-postasıyla etkinleştirilir; kullanıcılar e-posta koduyla hesaplarını doğrulayabilir ve şifrelerini yenileyebilir. Eski hesaplarda kullanılan `<kullanici_adi>@stokta.invalid` dahili kimlikleri geriye dönük uyumluluk için korunur ve arayüzde gösterilmez.
 
 ## Yerel çalıştırma
 
@@ -66,6 +66,7 @@ npm run build:apk
 ## Arka uç kaynakları
 
 - `supabase/schema.sql`: tablolar, RLS, yetkiler, atomik RPC işlevleri ve Realtime yayını.
+- `supabase/config.toml`: herkese açık doğrulama uçları ile oturum gerektiren yönetim uçlarının JWT geçidi yapılandırması.
 - `supabase/migrations/20260822125630_multitenant_saas.sql`: çok kiracılı işletme, abonelik ve veri izolasyonu geçişi.
 - `supabase/functions/bootstrap-admin/index.ts`: yalnızca boş bir kurulumda ilk platform yöneticisini oluşturma.
 - `supabase/functions/create-coworker/index.ts`: yalnızca yönetici tarafından çalışan hesabı oluşturma.

@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+  <rect width="1080" height="1920" fill="#f4f1e9"/>
+  <circle cx="1010" cy="150" r="280" fill="#e5eee8"/>
+  <text x="64" y="105" font-family="Arial, sans-serif" font-size="18" font-weight="800" letter-spacing="2" fill="#367258">STOKDAŞ İLE</text>
+  <text x="64" y="178" font-family="Arial, sans-serif" font-size="58" font-weight="800" fill="#172820">Ortak stok,</text>
+  <text x="64" y="244" font-family="Arial, sans-serif" font-size="58" font-weight="800" fill="#172820">tek gerçek.</text>
+  <text x="64" y="297" font-family="Arial, sans-serif" font-size="26" fill="#67736c">Ekibinizdeki her hareket anında güncellensin.</text>
+
+  <rect x="68" y="360" width="944" height="1492" rx="58" fill="#102018" opacity="0.15"/>
+  <rect x="86" y="342" width="908" height="1492" rx="54" fill="#f4f5f1" stroke="#d8ddd7" stroke-width="3"/>
+  <rect x="454" y="362" width="172" height="24" rx="12" fill="#0b1511"/>
+  <rect x="86" y="342" width="908" height="410" rx="54" fill="#172820"/>
+  <rect x="86" y="700" width="908" height="52" fill="#172820"/>
+  <text x="132" y="411" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="#ffffff">09:41</text>
+  <text x="868" y="411" font-family="Arial, sans-serif" font-size="19" fill="#ffffff">●  ▰  ▮</text>
+  <text x="132" y="488" font-family="Arial, sans-serif" font-size="14" font-weight="800" letter-spacing="1.5" fill="#86a095">28 AĞUSTOS CUMA</text>
+  <text x="132" y="546" font-family="Arial, sans-serif" font-size="42" font-weight="800" fill="#ffffff">Merhaba, Deniz</text>
+  <text x="132" y="581" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#9fb0a7">Örnek İşletme</text>
+  <rect x="836" y="470" width="82" height="82" rx="25" fill="#f3a952"/>
+  <text x="877" y="522" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="900" fill="#172820">DK</text>
+  <rect x="674" y="488" width="142" height="52" rx="15" fill="#223a2f" stroke="#3f5c4e"/>
+  <text x="745" y="520" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="900" fill="#cce0d5">+ Çalışan</text>
+
+  <rect x="116" y="632" width="262" height="170" rx="22" fill="#ffffff" stroke="#e3e6e1"/>
+  <circle cx="146" cy="666" r="8" fill="#3f936d"/>
+  <text x="136" y="705" font-family="Arial, sans-serif" font-size="12" font-weight="900" letter-spacing="1" fill="#848c87">TOPLAM ÜRÜN</text>
+  <text x="136" y="758" font-family="Arial, sans-serif" font-size="44" font-weight="800" fill="#18231e">128</text>
+  <text x="136" y="786" font-family="Arial, sans-serif" font-size="12" fill="#929994">Aktif ürün çeşidi</text>
+  <rect x="409" y="632" width="262" height="170" rx="22" fill="#ffffff" stroke="#e3e6e1"/>
+  <circle cx="439" cy="666" r="8" fill="#e9a34d"/>
+  <text x="429" y="705" font-family="Arial, sans-serif" font-size="12" font-weight="900" letter-spacing="1" fill="#848c87">AZALAN STOK</text>
+  <text x="429" y="758" font-family="Arial, sans-serif" font-size="44" font-weight="800" fill="#18231e">6</text>
+  <text x="429" y="786" font-family="Arial, sans-serif" font-size="12" fill="#929994">2 ürün tükendi</text>
+  <rect x="702" y="632" width="262" height="170" rx="22" fill="#ffffff" stroke="#e3e6e1"/>
+  <circle cx="732" cy="666" r="8" fill="#5f8da5"/>
+  <text x="722" y="705" font-family="Arial, sans-serif" font-size="12" font-weight="900" letter-spacing="1" fill="#848c87">BUGÜNKÜ İŞLEM</text>
+  <text x="722" y="758" font-family="Arial, sans-serif" font-size="44" font-weight="800" fill="#18231e">24</text>
+  <text x="722" y="786" font-family="Arial, sans-serif" font-size="12" fill="#929994">Buluta kaydedildi</text>
+
+  <text x="122" y="866" font-family="Arial, sans-serif" font-size="12" font-weight="900" letter-spacing="1.5" fill="#848c87">ANLIK LİSTE</text>
+  <text x="122" y="913" font-family="Arial, sans-serif" font-size="33" font-weight="800" fill="#1b2721">Stok kontrolü</text>
+  <rect x="790" y="859" width="160" height="54" rx="14" fill="#ffffff" stroke="#dbe0db"/>
+  <text x="870" y="893" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="800" fill="#65706a">Azalanlar</text>
+  <rect x="116" y="947" width="848" height="72" rx="18" fill="#ffffff" stroke="#dfe3df"/>
+  <text x="146" y="992" font-family="Arial, sans-serif" font-size="25" fill="#66736c">⌕</text>
+  <text x="190" y="992" font-family="Arial, sans-serif" font-size="17" fill="#959d98">Ürün, kod veya kategori ara</text>
+
+  <rect x="116" y="1050" width="848" height="264" rx="24" fill="#ffffff" stroke="#e2e5e1"/>
+  <rect x="142" y="1080" width="60" height="60" rx="18" fill="#e7f1ec"/>
+  <text x="172" y="1120" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="900" fill="#337559">K</text>
+  <text x="224" y="1106" font-family="Arial, sans-serif" font-size="21" font-weight="800" fill="#1b2721">Koli Bandı 45 mm</text>
+  <text x="224" y="1137" font-family="Arial, sans-serif" font-size="14" fill="#909792">AMB-045 · Ambalaj</text>
+  <rect x="826" y="1088" width="104" height="38" rx="19" fill="#e6f2eb"/>
+  <text x="878" y="1112" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="900" fill="#347457">YETERLİ</text>
+  <line x1="142" y1="1170" x2="938" y2="1170" stroke="#eff1ee" stroke-width="2"/>
+  <text x="142" y="1204" font-family="Arial, sans-serif" font-size="11" font-weight="900" letter-spacing="1" fill="#929994">MEVCUT STOK</text>
+  <text x="142" y="1253" font-family="Arial, sans-serif" font-size="38" font-weight="800" fill="#1a2721">128 <tspan font-size="18" font-weight="600" fill="#68716c">adet</tspan></text>
+  <text x="938" y="1204" text-anchor="end" font-family="Arial, sans-serif" font-size="11" font-weight="900" letter-spacing="1" fill="#929994">UYARI SINIRI</text>
+  <text x="938" y="1244" text-anchor="end" font-family="Arial, sans-serif" font-size="17" font-weight="700" fill="#69726d">20 adet</text>
+  <rect x="116" y="1260" width="424" height="54" rx="0" fill="#edf6f1"/>
+  <rect x="540" y="1260" width="424" height="54" rx="0" fill="#fff8ee"/>
+  <text x="328" y="1294" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="900" fill="#2b7354">+ Stok ekle</text>
+  <text x="752" y="1294" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="900" fill="#9b6323">− Stoktan düş</text>
+
+  <rect x="116" y="1340" width="848" height="250" rx="24" fill="#ffffff" stroke="#e2e5e1"/>
+  <rect x="142" y="1370" width="60" height="60" rx="18" fill="#fff0db"/>
+  <text x="172" y="1410" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="900" fill="#a56620">E</text>
+  <text x="224" y="1396" font-family="Arial, sans-serif" font-size="21" font-weight="800" fill="#1b2721">Etiket Rulosu</text>
+  <text x="224" y="1427" font-family="Arial, sans-serif" font-size="14" fill="#909792">ETK-100 · Sarf Malzeme</text>
+  <rect x="826" y="1378" width="104" height="38" rx="19" fill="#fff0db"/>
+  <text x="878" y="1402" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="900" fill="#a56620">AZALDI</text>
+  <line x1="142" y1="1460" x2="938" y2="1460" stroke="#eff1ee" stroke-width="2"/>
+  <text x="142" y="1494" font-family="Arial, sans-serif" font-size="11" font-weight="900" letter-spacing="1" fill="#929994">MEVCUT STOK</text>
+  <text x="142" y="1543" font-family="Arial, sans-serif" font-size="38" font-weight="800" fill="#1a2721">6 <tspan font-size="18" font-weight="600" fill="#68716c">adet</tspan></text>
+  <text x="938" y="1494" text-anchor="end" font-family="Arial, sans-serif" font-size="11" font-weight="900" letter-spacing="1" fill="#929994">UYARI SINIRI</text>
+  <text x="938" y="1534" text-anchor="end" font-family="Arial, sans-serif" font-size="17" font-weight="700" fill="#69726d">10 adet</text>
+
+  <rect x="116" y="1622" width="848" height="126" rx="22" fill="#ffffff" stroke="#e1e5e0"/>
+  <text x="142" y="1658" font-family="Arial, sans-serif" font-size="11" font-weight="900" letter-spacing="1.4" fill="#848c87">CANLI KAYIT</text>
+  <circle cx="158" cy="1706" r="22" fill="#e6f2eb"/>
+  <text x="158" y="1714" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="900" fill="#337758">+</text>
+  <text x="196" y="1698" font-family="Arial, sans-serif" font-size="15" font-weight="800" fill="#26322c">Koli Bandı 45 mm</text>
+  <text x="196" y="1725" font-family="Arial, sans-serif" font-size="12" fill="#8a918d">Deniz Kaya · 24 adet · Mal kabul</text>
+  <text x="930" y="1711" text-anchor="end" font-family="Arial, sans-serif" font-size="12" fill="#969d98">09:36</text>
+
+  <rect x="850" y="1740" width="94" height="94" rx="30" fill="#f3a952"/>
+  <text x="897" y="1802" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#172820">+</text>
+</svg>

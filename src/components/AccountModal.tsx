@@ -23,8 +23,12 @@ type Props = {
   isPlatformOperator: boolean;
   saving: boolean;
   onClose: () => void;
+  onOpenSubscription: () => void;
+  onOpenTerms: () => void;
+  onOpenSafetyCenter: () => void;
+  onOpenPlatformSafetyCenter: () => void;
   onSignOut: () => void;
-  onDelete: (confirmation: string) => void;
+  onDelete: (confirmation: string, currentPassword: string) => void;
 };
 
 export default function AccountModal({
@@ -37,32 +41,43 @@ export default function AccountModal({
   isPlatformOperator,
   saving,
   onClose,
+  onOpenSubscription,
+  onOpenTerms,
+  onOpenSafetyCenter,
+  onOpenPlatformSafetyCenter,
   onSignOut,
   onDelete,
 }: Props) {
   const [page, setPage] = useState<"account" | "privacy" | "delete">("account");
   const [confirmation, setConfirmation] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
 
   useEffect(() => {
     if (visible) {
       setPage("account");
       setConfirmation("");
+      setCurrentPassword("");
     }
   }, [visible]);
 
   const isAdmin = role === "admin";
   const expectedConfirmation = isAdmin ? "STOKDAŞ" : username;
-  const canDelete = confirmation.trim() === expectedConfirmation && !saving;
+  const needsGooglePlayCancellation = isAdmin
+    && ["Aktif", "Ödeme bekliyor", "Askıda"].includes(subscriptionLabel);
+  const canDelete = confirmation.trim() === expectedConfirmation
+    && currentPassword.length > 0
+    && currentPassword.length <= 72
+    && !saving;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={saving ? () => undefined : onClose}>
       <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <View style={styles.header}>
             <Pressable
               style={[styles.headerButton, page === "account" && styles.headerButtonHidden]}
-              onPress={() => { setPage("account"); setConfirmation(""); }}
+              onPress={() => { setPage("account"); setConfirmation(""); setCurrentPassword(""); }}
               disabled={page === "account" || saving}
             >
               <Text style={styles.headerButtonText}>‹</Text>
@@ -74,7 +89,7 @@ export default function AccountModal({
           </View>
 
           {page === "account" ? (
-            <View>
+            <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.profileCard}>
                 <View style={styles.avatar}><Text style={styles.avatarText}>{initials(displayName)}</Text></View>
                 <View style={styles.profileText}>
@@ -88,6 +103,37 @@ export default function AccountModal({
                 <View><Text style={styles.menuTitle}>Gizlilik politikası</Text><Text style={styles.menuCaption}>Verilerin nasıl işlendiğini görüntüle</Text></View>
                 <Text style={styles.chevron}>›</Text>
               </Pressable>
+              <Pressable style={styles.menuItem} onPress={onOpenTerms} accessibilityRole="button">
+                <View><Text style={styles.menuTitle}>Kullanım koşulları</Text><Text style={styles.menuCaption}>İçerik ve güvenli kullanım kurallarını incele</Text></View>
+                <Text style={styles.chevron}>›</Text>
+              </Pressable>
+              {isAdmin && !isPlatformOperator ? <Pressable
+                style={styles.menuItem}
+                onPress={onOpenSubscription}
+                accessibilityRole="button"
+                accessibilityLabel="Google Play aboneliğini yönet"
+              >
+                <View><Text style={styles.menuTitle}>Abonelik ve ödeme</Text><Text style={styles.menuCaption}>Google Play aboneliğini başlat veya geri yükle</Text></View>
+                <Text style={styles.chevron}>›</Text>
+              </Pressable> : null}
+              {isAdmin ? <Pressable
+                style={styles.menuItem}
+                onPress={onOpenSafetyCenter}
+                accessibilityRole="button"
+                accessibilityLabel="İşletme Güvenlik Merkezini aç"
+              >
+                <View><Text style={styles.menuTitle}>Güvenlik Merkezi</Text><Text style={styles.menuCaption}>Bu işletmedeki içerik ve kullanıcı bildirimlerini incele</Text></View>
+                <View style={styles.openPill}><Text style={styles.openPillText}>AÇIK</Text></View>
+              </Pressable> : null}
+              {isPlatformOperator ? <Pressable
+                style={styles.menuItem}
+                onPress={onOpenPlatformSafetyCenter}
+                accessibilityRole="button"
+                accessibilityLabel="Platform Güvenlik Kuyruğunu aç"
+              >
+                <View><Text style={styles.menuTitle}>Platform Güvenlik Kuyruğu</Text><Text style={styles.menuCaption}>İşletme yöneticileri hakkındaki bildirimleri incele</Text></View>
+                <View style={styles.platformPill}><Text style={styles.platformPillText}>PLATFORM</Text></View>
+              </Pressable> : null}
               <Pressable style={styles.menuItem} onPress={onSignOut}>
                 <View><Text style={styles.menuTitle}>Çıkış yap</Text><Text style={styles.menuCaption}>Yalnızca bu cihazdaki oturumu kapat</Text></View>
                 <Text style={styles.chevron}>›</Text>
@@ -97,8 +143,8 @@ export default function AccountModal({
                 <Text style={styles.dangerChevron}>›</Text>
               </Pressable> : null}
 
-              <Text style={styles.version}>Stokdaş · Sürüm 1.3.2</Text>
-            </View>
+              <Text style={styles.version}>Stokdaş · Sürüm 1.3.4</Text>
+            </ScrollView>
           ) : null}
 
           {page === "privacy" ? <PrivacyPolicy /> : null}
@@ -113,6 +159,21 @@ export default function AccountModal({
                     : "Adınız, kullanıcı adınız ve giriş hesabınız kalıcı olarak silinir. Ortak stok geçmişinin tutarlılığı için eski hareketleriniz yalnızca “Silinmiş kullanıcı” adıyla anonim olarak kalır."}
                 </Text>
               </View>
+              {needsGooglePlayCancellation ? <View style={styles.billingWarningBox}>
+                <Text style={styles.billingWarningTitle}>Önce Google Play yenilemesini kapatın</Text>
+                <Text style={styles.billingWarningText}>
+                  İşletmeyi veya yönetici hesabını silmek Google Play aboneliğini otomatik olarak iptal etmez. Etkin bir Google Play aboneliğiniz varsa önce otomatik yenilemeyi Google Play'de iptal edin; sonra Stokdaş'ta satın alımları geri yükleyerek durumun güncellendiğini doğrulayın. Aksi hâlde ücret alınmaya devam edebilir.
+                </Text>
+                <Pressable
+                  style={styles.billingWarningButton}
+                  onPress={onOpenSubscription}
+                  disabled={saving}
+                  accessibilityRole="button"
+                  accessibilityLabel="Google Play aboneliğini iptal etmek ve durumu geri yüklemek için abonelik ekranını aç"
+                >
+                  <Text style={styles.billingWarningButtonText}>Abonelik ve ödemeye git</Text>
+                </Pressable>
+              </View> : null}
               <Text style={styles.confirmLabel}>Devam etmek için aşağıya {expectedConfirmation} yazın</Text>
               <TextInput
                 style={styles.confirmInput}
@@ -124,7 +185,20 @@ export default function AccountModal({
                 autoCorrect={false}
                 editable={!saving}
               />
-              <Pressable style={[styles.deleteButton, !canDelete && styles.disabled]} onPress={() => onDelete(confirmation.trim())} disabled={!canDelete}>
+              <Text style={styles.confirmLabel}>Mevcut şifreniz</Text>
+              <TextInput
+                style={styles.confirmInput}
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                placeholder="Mevcut şifrenizi girin"
+                placeholderTextColor="#9ca39f"
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                textContentType="password"
+                editable={!saving}
+              />
+              <Pressable style={[styles.deleteButton, !canDelete && styles.disabled]} onPress={() => onDelete(confirmation.trim(), currentPassword)} disabled={!canDelete}>
                 {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.deleteButtonText}>{isAdmin ? "Her şeyi kalıcı olarak sil" : "Hesabımı kalıcı olarak sil"}</Text>}
               </Pressable>
             </ScrollView>
@@ -138,11 +212,11 @@ export default function AccountModal({
 function PrivacyPolicy() {
   return (
     <ScrollView style={styles.policy} showsVerticalScrollIndicator={false}>
-      <Text style={styles.policyDate}>Yürürlük tarihi: 25 Ağustos 2026</Text>
+      <Text style={styles.policyDate}>Yürürlük tarihi: 1 Eylül 2026</Text>
       <PolicySection title="Veri sorumlusu">Stokdaş uygulaması İsmail Tırtar tarafından işletilir. Hizmet, kiracı işletmelerin stok ve kullanıcı verilerini birbirinden ayrılmış çalışma alanlarında yönetmesini sağlar.</PolicySection>
-      <PolicySection title="İşlenen veriler">İşletme adı; kullanıcı adı, ad ve soyad, hesap rolü, oturum bilgileri; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kayıt kötüye kullanımını sınırlandırmak için ağ adresinin geri döndürülemeyen özeti kısa süreyle tutulur. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</PolicySection>
-      <PolicySection title="Amaç ve paylaşım">Veriler yalnızca kimlik doğrulama, işletme hesabı açma, ortak stok takibi, kiralama yönetimi, yetkilendirme, güvenlik ve işlem geçmişi amaçlarıyla kullanılır. Reklam veya kullanıcı takibi yapılmaz. Altyapı sağlayıcısı olarak Supabase kullanılır; veriler Frankfurt bölgesindeki sunucularda tutulur.</PolicySection>
-      <PolicySection title="Saklama ve silme">Veriler hesap veya işletme çalışma alanı silinene kadar saklanır. Çalışan hesabı silindiğinde profil bilgileri kaldırılır ve eski hareketler anonimleştirilir. İşletme yöneticisi silme işlemini başlattığında yalnızca kendi işletmesinin verileri ve hesapları kalıcı olarak kaldırılır.</PolicySection>
+      <PolicySection title="İşlenen veriler">İşletme adı; kullanıcı adı, ad ve soyad, doğrulanmış kurtarma e-postası, hesap rolü, oturum ve güvenlik kayıtları; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kullanım koşullarının sürümü ve kabul zamanı da kaydedilir. Google Play aboneliğinde ürün ve plan, abonelik durumu ve dönemi doğrulanıp saklanır; satın alma belirteci ile sipariş referansının yalnızca geri döndürülemez özetleri erişim doğrulaması, dolandırıcılığın önlenmesi ve muhasebe kayıtları için tutulur. Kart ve ödeme yöntemi bilgileri Stokdaş'a aktarılmaz. Bir içerik veya kullanıcı bildirildiğinde hedef kayıt, neden, isteğe bağlı açıklama, bildiren hesap, zaman ve yöneticinin moderasyon işlemi tutulur. Kötüye kullanımı sınırlandırmak için ağ adresinin geri döndürülemeyen özeti güvenlik kontrollerinde kullanılabilir. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</PolicySection>
+      <PolicySection title="Amaç ve paylaşım">Veriler yalnızca kimlik doğrulama, e-posta doğrulama, hesap kurtarma, işletme hesabı açma, ortak stok takibi, abonelik ve ödeme doğrulaması, yetkilendirme, güvenlik, içerik moderasyonu ve işlem geçmişi amaçlarıyla kullanılır. İşletme içindeki içerik ve çalışan bildirimleri yalnızca o işletmenin yöneticilerine; işletme yöneticileri hakkındaki bildirimler ise yalnızca yetkili platform operatörlerine gösterilir. Abonelik işlemi ve doğrulaması için gerekli bilgiler Google Play ile paylaşılır; ödeme Google Play tarafından yürütülür. Reklam, veri satışı veya kullanıcı takibi yapılmaz. Altyapı sağlayıcısı olarak Supabase kullanılır; veriler Frankfurt bölgesindeki sunucularda tutulur.</PolicySection>
+      <PolicySection title="Saklama ve silme">Veriler hesap veya işletme çalışma alanı silinene kadar saklanır. Moderasyon bildirimleri, kararların tutarlılığı ve kötüye kullanımın önlenmesi için hedef içerik kaldırıldıktan veya bildirim çözüldükten sonra da işletme çalışma alanı silinene kadar saklanabilir. Çalışan hesabı silindiğinde profil bilgileri kaldırılır ve eski hareketler anonimleştirilir. İşletme yöneticisi silme işlemini başlattığında yalnızca kendi işletmesinin verileri ve hesapları kalıcı olarak kaldırılır.</PolicySection>
       <PolicySection title="Güvenlik">Aktarım sırasında HTTPS kullanılır. Her kayıt işletme kimliğiyle ayrılır; veritabanında satır düzeyi güvenlik ve rol tabanlı yetkilendirme uygulanır. Bir işletme diğer işletmenin ürün, hareket veya kullanıcı verilerini okuyamaz. Hizmet rolü anahtarı mobil uygulamaya eklenmez.</PolicySection>
       <PolicySection title="Haklarınız">Hesabınızı bu ekrandaki “Hesabımı sil” seçeneğiyle silebilirsiniz. İşletme yöneticisi yalnızca kendi işletmesinin çalışma alanını kaldırabilir. Platform yöneticisi hesabı güvenlik nedeniyle uygulama içinden silinemez. Gizlilik ve veri talepleri için tirtarismail@gmail.com adresine ulaşabilirsiniz.</PolicySection>
       <View style={styles.policyBottom} />
@@ -179,6 +253,10 @@ const styles = StyleSheet.create({
   menuTitle: { color: "#26322c", fontSize: 12, fontWeight: "800" },
   menuCaption: { marginTop: 4, color: "#8a918d", fontSize: 9 },
   chevron: { color: "#89938e", fontSize: 23 },
+  openPill: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 20, backgroundColor: "#fff0db" },
+  openPillText: { color: "#9a601f", fontSize: 8, fontWeight: "900" },
+  platformPill: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 20, backgroundColor: "#e8eef8" },
+  platformPillText: { color: "#46658e", fontSize: 8, fontWeight: "900" },
   dangerItem: { marginTop: 8, borderBottomWidth: 0 },
   dangerTitle: { color: "#a84d43", fontSize: 12, fontWeight: "800" },
   dangerCaption: { marginTop: 4, color: "#b57870", fontSize: 9 },
@@ -187,6 +265,11 @@ const styles = StyleSheet.create({
   warningBox: { padding: 15, borderWidth: 1, borderColor: "#efd2cc", borderRadius: 13, backgroundColor: "#fae9e5" },
   warningTitle: { color: "#943f36", fontSize: 13, fontWeight: "900" },
   warningText: { marginTop: 7, color: "#8f5149", fontSize: 10, lineHeight: 16 },
+  billingWarningBox: { marginTop: 10, padding: 15, borderWidth: 1, borderColor: "#efd5ad", borderRadius: 13, backgroundColor: "#fff4df" },
+  billingWarningTitle: { color: "#8d5a16", fontSize: 12, fontWeight: "900" },
+  billingWarningText: { marginTop: 7, color: "#8b6b40", fontSize: 10, lineHeight: 16 },
+  billingWarningButton: { minHeight: 40, marginTop: 10, alignItems: "center", justifyContent: "center", borderRadius: 9, backgroundColor: "#f3a952" },
+  billingWarningButtonText: { color: "#553713", fontSize: 9, fontWeight: "900" },
   confirmLabel: { marginTop: 18, marginBottom: 7, color: "#59645e", fontSize: 10, fontWeight: "800" },
   confirmInput: { height: 48, paddingHorizontal: 13, borderWidth: 1, borderColor: "#d8ddd8", borderRadius: 11, backgroundColor: "#fff", color: "#17201d", fontSize: 13 },
   deleteButton: { height: 50, marginTop: 14, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#ad4f44" },

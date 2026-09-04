@@ -1,26 +1,22 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.112.3";
+import {
+  corsJsonHeaders,
+  isStrongPassword,
+  json,
+  normalizeRecoveryEmail,
+  normalizeUsername,
+  requestIp,
+  sha256,
+} from "../_shared/security.ts";
 
-const jsonHeaders = {
-  "Content-Type": "application/json",
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+type PendingRow = {
+  id: string;
+  auth_user_id: string;
+  expires_at: string;
 };
 
-function json(status: number, body: Record<string, unknown>) {
-  return new Response(JSON.stringify(body), { status, headers: jsonHeaders });
-}
-
-function normalizeUsername(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value
-    .trim()
-    .toLocaleLowerCase("tr-TR")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/ı/g, "i");
-  return /^[a-z0-9][a-z0-9._-]{2,31}$/.test(normalized) ? normalized : null;
-}
+const CURRENT_UGC_TERMS_VERSION = "2026-08-29-v1";
 
 function slugBase(value: string) {
   return value
@@ -34,39 +30,52 @@ function slugBase(value: string) {
     .slice(0, 38) || "isletme";
 }
 
-function isStrongPassword(value: string) {
-  return value.length >= 8 && value.length <= 72
-    && /[a-z]/.test(value) && /[A-Z]/.test(value)
-    && /[0-9]/.test(value) && /[^A-Za-z0-9]/.test(value);
-}
-
-async function sha256(value: string) {
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function requestIp(req: Request) {
-  return req.headers.get("cf-connecting-ip")
-    ?? req.headers.get("x-real-ip")
-    ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-    ?? "unknown";
+async function removeExpiredPending(
+  admin: any,
+  rows: PendingRow[],
+) {
+  for (const row of rows) {
+    if (new Date(row.expires_at).getTime() > Date.now()) continue;
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("id", row.auth_user_id)
+      .maybeSingle();
+    if (!profile) {
+      const { data: userData } = await admin.auth.admin.getUserById(row.auth_user_id);
+      if (userData.user?.app_metadata?.stokta_pending_registration) {
+        await admin.auth.admin.deleteUser(row.auth_user_id);
+      }
+    }
+    await admin.from("pending_account_registrations").delete().eq("id", row.id);
+  }
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: jsonHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsJsonHeaders });
   if (req.method !== "POST") return json(405, { error: "Yalnızca POST desteklenir" });
 
   try {
+    const startedAt = Date.now();
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceRoleKey) return json(500, { error: "Sunucu yapılandırması eksik" });
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+      return json(500, { error: "Sunucu yapılandırması eksik" });
+    }
 
     const body = await req.json() as Record<string, unknown>;
     const organizationName = typeof body.organizationName === "string" ? body.organizationName.trim() : "";
     const displayName = typeof body.displayName === "string" ? body.displayName.trim() : "";
     const username = normalizeUsername(body.username);
+    const recoveryEmail = normalizeRecoveryEmail(body.recoveryEmail);
     const password = typeof body.password === "string" ? body.password : "";
+    const ugcTermsAccepted = body.ugcTermsAccepted === true;
+    const ugcTermsVersion = typeof body.ugcTermsVersion === "string" ? body.ugcTermsVersion : "";
 
+    if (!ugcTermsAccepted || ugcTermsVersion !== CURRENT_UGC_TERMS_VERSION) {
+      return json(400, { error: "Güncel Kullanım Koşulları ve Topluluk Kuralları kabul edilmelidir" });
+    }
     if (organizationName.length < 2 || organizationName.length > 100) {
       return json(400, { error: "İşletme adı 2-100 karakter olmalı" });
     }
@@ -76,6 +85,9 @@ Deno.serve(async (req: Request) => {
     if (!username) {
       return json(400, { error: "Kullanıcı adı 3-32 karakter olmalı; yalnızca a-z, 0-9, nokta, alt çizgi ve tire kullanılabilir" });
     }
+    if (!recoveryEmail) {
+      return json(400, { error: "Geçerli bir e-posta adresi girin" });
+    }
     if (!isStrongPassword(password)) {
       return json(400, { error: "Şifre 8-72 karakter olmalı; büyük harf, küçük harf, rakam ve sembol içermeli" });
     }
@@ -83,91 +95,153 @@ Deno.serve(async (req: Request) => {
     const admin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-
-    const keyHash = await sha256(`stokta:self-register:v1:${requestIp(req)}:${supabaseUrl}`);
-    const { data: allowed, error: rateLimitError } = await admin.rpc("consume_signup_rate_limit", {
-      p_key_hash: keyHash,
+    const authClient = createClient(supabaseUrl, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
     });
-    if (rateLimitError) {
-      console.error("Registration rate limit failed", rateLimitError);
-      return json(503, { error: "Kayıt hizmeti şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin." });
-    }
-    if (!allowed) {
-      return json(429, { error: "Çok fazla kayıt denemesi yapıldı. Bir saat sonra tekrar deneyin." });
-    }
 
-    const email = `${username}@stokta.invalid`;
-    const { data: authData, error: authError } = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      app_metadata: {
-        self_registered: true,
-        username,
-        display_name: displayName,
-      },
-      user_metadata: { display_name: displayName },
-    });
-    if (authError || !authData.user) {
-      const alreadyExists = authError?.message.toLowerCase().includes("already")
-        || authError?.message.toLowerCase().includes("registered");
-      return json(alreadyExists ? 409 : 400, {
-        error: alreadyExists ? "Bu kullanıcı adı zaten kullanılıyor" : (authError?.message ?? "Giriş hesabı oluşturulamadı"),
+    const ip = requestIp(req);
+    const [ipHash, accountHash, emailHash] = await Promise.all([
+      sha256(`stokta:self-register-ip:v2:${ip}:${supabaseUrl}:${serviceRoleKey}`),
+      sha256(`stokta:self-register-account:v2:${username}:${supabaseUrl}:${serviceRoleKey}`),
+      sha256(`stokta:self-register-email:v2:${recoveryEmail}:${supabaseUrl}:${serviceRoleKey}`),
+    ]);
+    const [
+      { data: ipAllowed, error: signupRateError },
+      { data: accountAllowed, error: accountRateError },
+      { data: emailAllowed, error: emailRateError },
+    ] =
+      await Promise.all([
+        admin.rpc("consume_signup_rate_limit", { p_key_hash: ipHash }),
+        admin.rpc("consume_auth_rate_limit", {
+          p_scope: "business-register-account",
+          p_key_hash: accountHash,
+          p_max_attempts: 5,
+          p_window_seconds: 3600,
+        }),
+        admin.rpc("consume_auth_rate_limit", {
+          p_scope: "business-register-email",
+          p_key_hash: emailHash,
+          p_max_attempts: 3,
+          p_window_seconds: 3600,
+        }),
+      ]);
+    if (signupRateError || accountRateError || emailRateError) {
+      console.error("Registration rate limiter unavailable", {
+        signupRateError,
+        accountRateError,
+        emailRateError,
       });
+      return json(503, { error: "Kayıt hizmeti şu anda kullanılamıyor" });
+    }
+    if (!ipAllowed || !accountAllowed || !emailAllowed) {
+      return json(429, { error: "Çok fazla kayıt denemesi yapıldı. Lütfen daha sonra tekrar deneyin." });
+    }
+
+    const [{ data: existingProfile }, usernamePending, emailPending] = await Promise.all([
+      admin.from("profiles").select("id").eq("username", username).maybeSingle(),
+      admin.from("pending_account_registrations")
+        .select("id,auth_user_id,expires_at").eq("username", username),
+      admin.from("pending_account_registrations")
+        .select("id,auth_user_id,expires_at").eq("email", recoveryEmail),
+    ]);
+    if (existingProfile) return json(409, { error: "Bu kullanıcı adı zaten kullanılıyor" });
+
+    const pendingById = new Map<string, PendingRow>();
+    for (const row of [...(usernamePending.data ?? []), ...(emailPending.data ?? [])] as PendingRow[]) {
+      pendingById.set(row.id, row);
+    }
+    await removeExpiredPending(admin, [...pendingById.values()]);
+
+    const [{ data: liveUsernamePending }, { data: liveEmailPending }] = await Promise.all([
+      admin.from("pending_account_registrations").select("id").eq("username", username).maybeSingle(),
+      admin.from("pending_account_registrations").select("id").eq("email", recoveryEmail).maybeSingle(),
+    ]);
+    if (liveUsernamePending) return json(409, { error: "Bu kullanıcı adı için doğrulama zaten bekleniyor" });
+    if (liveEmailPending) return json(409, { error: "Bu e-posta için doğrulama zaten bekleniyor" });
+
+    const { data: signupData, error: signupError } = await authClient.auth.signUp({
+      email: recoveryEmail,
+      password,
+      options: { data: { display_name: displayName } },
+    });
+    if (signupError || !signupData.user) {
+      const duplicate = signupError?.code === "email_exists"
+        || signupError?.code === "user_already_exists"
+        || signupError?.message.toLowerCase().includes("registered")
+        || signupError?.message.toLowerCase().includes("already");
+      return json(duplicate ? 409 : 400, {
+        error: duplicate ? "Bu e-posta adresi kullanılamıyor" : "Doğrulama e-postası gönderilemedi",
+      });
+    }
+
+    // A non-null session means project-level email confirmations are disabled.
+    // Fail closed instead of silently creating an unverified customer account.
+    if (signupData.session) {
+      await authClient.auth.signOut({ scope: "local" });
+      await admin.auth.admin.deleteUser(signupData.user.id);
+      return json(503, { error: "E-posta doğrulaması sunucuda etkinleştirilmeden kayıt açılamaz" });
+    }
+
+    const { data: createdUserData, error: createdUserError } =
+      await admin.auth.admin.getUserById(signupData.user.id);
+    const createdUser = createdUserData.user;
+    const createdAt = createdUser ? new Date(createdUser.created_at).getTime() : 0;
+    if (createdUserError
+      || !createdUser
+      || createdUser.email?.toLowerCase() !== recoveryEmail
+      || createdUser.email_confirmed_at
+      || createdAt < startedAt - 60000) {
+      return json(409, { error: "Bu e-posta adresi kullanılamıyor" });
     }
 
     const organizationSlug = `${slugBase(organizationName)}-${crypto.randomUUID().slice(0, 8)}`.slice(0, 48);
-    const { data: organization, error: organizationError } = await admin
-      .from("organizations")
-      .insert({
-        name: organizationName,
-        slug: organizationSlug,
-        subscription_status: "trial",
-        trial_ends_at: new Date(Date.now() + 14 * 86400000).toISOString(),
-        max_members: 5,
-        max_products: 1000,
-        created_by: authData.user.id,
-      })
-      .select("id,name,trial_ends_at,max_members,max_products")
-      .single();
-    if (organizationError || !organization) {
-      console.error("Self-service organization creation failed", organizationError);
-      await admin.auth.admin.deleteUser(authData.user.id);
-      return json(500, { error: "İşletme oluşturulamadı. Lütfen tekrar deneyin." });
+    const { error: markerError } = await admin.auth.admin.updateUserById(createdUser.id, {
+      app_metadata: {
+        ...createdUser.app_metadata,
+        stokta_pending_registration: "business_admin",
+        username,
+      },
+    });
+    if (markerError) {
+      await admin.auth.admin.deleteUser(createdUser.id);
+      return json(500, { error: "Kayıt doğrulaması hazırlanamadı" });
     }
 
-    const { error: profileError } = await admin.from("profiles").insert({
-      id: authData.user.id,
-      organization_id: organization.id,
+    const { error: pendingError } = await admin.from("pending_account_registrations").insert({
+      auth_user_id: createdUser.id,
+      registration_kind: "business_admin",
       username,
+      email: recoveryEmail,
       display_name: displayName,
-      role: "admin",
-      created_by: null,
-      is_platform_operator: false,
+      organization_name: organizationName,
+      organization_slug: organizationSlug,
+      ugc_terms_version: CURRENT_UGC_TERMS_VERSION,
+      ugc_terms_accepted_at: new Date().toISOString(),
     });
-    if (profileError) {
-      console.error("Self-service admin profile creation failed", profileError);
-      await admin.from("organizations").delete().eq("id", organization.id);
-      await admin.auth.admin.deleteUser(authData.user.id);
-      return json(profileError.code === "23505" ? 409 : 500, {
-        error: profileError.code === "23505"
-          ? "Bu kullanıcı adı zaten kullanılıyor"
-          : "Yönetici hesabı tamamlanamadı. Lütfen tekrar deneyin.",
+    if (pendingError) {
+      console.error("Pending business registration could not be stored", pendingError);
+      await admin.auth.admin.deleteUser(createdUser.id);
+      const duplicate = pendingError.code === "23505";
+      return json(duplicate ? 409 : 500, {
+        error: duplicate ? "Kullanıcı adı veya e-posta zaten kullanılıyor" : "Kayıt doğrulaması hazırlanamadı",
       });
     }
 
-    return json(201, {
-      organization: {
-        id: organization.id,
-        name: organization.name,
-        trialEndsAt: organization.trial_ends_at,
-        maxMembers: organization.max_members,
-        maxProducts: organization.max_products,
-      },
-      admin: { id: authData.user.id, username, displayName },
+    await admin.rpc("service_record_security_event", {
+      p_event_type: "business.registration_requested",
+      p_subject_id: createdUser.id,
+      p_ip_hash: ipHash,
+      p_metadata: { username },
+    });
+
+    return json(202, {
+      accepted: true,
+      verificationRequired: true,
+      username,
+      message: "E-postanıza gönderilen doğrulama kodunu girin.",
     });
   } catch (error) {
     console.error("Self-service registration failed", error);
-    return json(500, { error: "Kayıt tamamlanamadı. Lütfen tekrar deneyin." });
+    return json(500, { error: "Kayıt başlatılamadı. Lütfen tekrar deneyin." });
   }
 });

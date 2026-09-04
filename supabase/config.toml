@@ -1,0 +1,41 @@
+[functions.bootstrap-admin]
+verify_jwt = false
+
+[functions.register-business]
+verify_jwt = false
+
+[functions.username-login]
+verify_jwt = false
+
+[functions.verify-email-code]
+verify_jwt = false
+
+[functions.resend-email-code]
+verify_jwt = false
+
+[functions.request-password-reset]
+verify_jwt = false
+
+[functions.verify-password-reset-code]
+verify_jwt = false
+
+[functions.complete-password-reset]
+verify_jwt = false
+
+[functions.create-coworker]
+verify_jwt = true
+
+[functions.manage-coworkers]
+verify_jwt = true
+
+[functions.account-security]
+verify_jwt = true
+
+[functions.delete-account]
+verify_jwt = true
+
+[functions.manage-businesses]
+verify_jwt = true
+
+[functions.verify-play-subscription]
+verify_jwt = true
