@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import {
   ActivityIndicator,
@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { normalizeUsername, supabase } from "../lib/supabase";
+import { retryTransientSupabaseOperation } from "../lib/auth-retry";
 import { CURRENT_UGC_TERMS_VERSION } from "../lib/ugc";
 import TermsModal from "../components/TermsModal";
 
@@ -46,6 +47,7 @@ export default function LoginScreen() {
   const [notice, setNotice] = useState("");
   const [registrationTermsAccepted, setRegistrationTermsAccepted] = useState(false);
   const [termsModal, setTermsModal] = useState(false);
+  const signInInFlight = useRef(false);
 
   const isRegister = mode === "register";
   const isVerification = Boolean(verificationUsername);
@@ -74,43 +76,64 @@ export default function LoginScreen() {
     } | null)?.session;
     if (!session?.access_token || !session.refresh_token) {
       setError("Giriş oturumu alınamadı. Lütfen tekrar deneyin.");
-      return;
+      return false;
     }
-    const { error: sessionError } = await supabase.auth.setSession({
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-    });
-    if (sessionError) setError(friendlyError(sessionError.message));
+
+    const { data: sessionData, error: sessionError } = await retryTransientSupabaseOperation(
+      () => supabase.auth.setSession({
+        access_token: session.access_token as string,
+        refresh_token: session.refresh_token as string,
+      }),
+    );
+    if (sessionError) {
+      setError(friendlyError(sessionError.message));
+      return false;
+    }
+    if (!sessionData.session) {
+      setError("Giriş oturumu alınamadı. Lütfen tekrar deneyin.");
+      return false;
+    }
+    return true;
   }
 
   async function signIn() {
+    if (signInInFlight.current) return;
+
     const normalizedUsername = normalizeUsername(username);
     if (!normalizedUsername || !password) {
       setError("Kullanıcı adı ve şifre zorunludur.");
       return;
     }
 
+    signInInFlight.current = true;
     setLoading(true);
     setError("");
     setNotice("");
-    const { data, error: authError } = await supabase.functions.invoke("username-login", {
-      body: { username: normalizedUsername, password },
-    });
-    setLoading(false);
-    if (authError) {
-      const details = await edgeFunctionErrorDetails(authError);
-      if (details.code === "EMAIL_VERIFICATION_REQUIRED") {
-        setVerificationUsername(details.username ?? normalizedUsername);
-        setVerificationPassword(password);
-        setMaskedEmail(details.maskedEmail ?? null);
-        setVerificationCode("");
-        setError("");
+
+    try {
+      const { data, error: authError } = await supabase.functions.invoke("username-login", {
+        body: { username: normalizedUsername, password },
+      });
+      if (authError) {
+        const details = await edgeFunctionErrorDetails(authError);
+        if (details.code === "EMAIL_VERIFICATION_REQUIRED") {
+          setVerificationUsername(details.username ?? normalizedUsername);
+          setVerificationPassword(password);
+          setMaskedEmail(details.maskedEmail ?? null);
+          setVerificationCode("");
+          setError("");
+          return;
+        }
+        setError(friendlyError(details.message));
         return;
       }
-      setError(friendlyError(details.message));
-      return;
+      await useSession(data);
+    } catch {
+      setError("Giriş tamamlanamadı. Lütfen tekrar deneyin.");
+    } finally {
+      signInInFlight.current = false;
+      setLoading(false);
     }
-    await useSession(data);
   }
 
   async function registerBusiness() {
