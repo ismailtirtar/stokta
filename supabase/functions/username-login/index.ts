@@ -12,6 +12,44 @@ import {
 
 const invalidCredentials = { error: "Kullanıcı adı veya şifre hatalı" };
 
+type SupabaseErrorLike = {
+  code?: string;
+  message?: string;
+  name?: string;
+  status?: number;
+};
+
+type SupabaseResultLike = {
+  error: unknown | null;
+  status?: number;
+};
+
+function isTransientSupabaseError(error: unknown, responseStatus?: number) {
+  if (!error) return false;
+
+  const candidate = error as SupabaseErrorLike;
+  const status = responseStatus ?? candidate.status;
+  if (status === 408 || status === 425 || (typeof status === "number" && status >= 500)) {
+    return true;
+  }
+  if (candidate.name === "AuthRetryableFetchError" || candidate.name === "AuthUnknownError") {
+    return true;
+  }
+
+  const diagnostic = `${candidate.code ?? ""} ${candidate.message ?? ""}`.toLowerCase();
+  return /\b(network|fetch|timeout|timed out|connection|gateway)\b/.test(diagnostic);
+}
+
+async function retryTransientSupabaseOperation<T extends SupabaseResultLike>(
+  operation: () => Promise<T>,
+) {
+  const firstResult = await operation();
+  if (!isTransientSupabaseError(firstResult.error, firstResult.status)) return firstResult;
+
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  return operation();
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsJsonHeaders });
   if (req.method !== "POST") return json(405, { error: "Yalnızca POST desteklenir" });
@@ -83,12 +121,12 @@ Deno.serve(async (req: Request) => {
       return json(401, invalidCredentials);
     }
 
-    const { data: profile, error: profileError } = await admin
+    const { data: profile, error: profileError } = await retryTransientSupabaseOperation(() => admin
       .from("profiles")
-      .select("id,must_change_password")
+      .select("id,must_change_password,recovery_email,recovery_email_verified_at")
       .eq("username", username)
       .eq("is_active", true)
-      .maybeSingle();
+      .maybeSingle());
     if (profileError) {
       console.error("Username lookup failed", profileError);
       return json(503, { error: "Giriş hizmeti şu anda kullanılamıyor" });
@@ -99,12 +137,26 @@ Deno.serve(async (req: Request) => {
     let pendingExpiresAt: string | null = null;
 
     if (profile?.id) {
-      const { data: authUserData, error: authUserError } =
-        await admin.auth.admin.getUserById(profile.id);
-      email = authUserData.user?.email ?? "";
-      if (authUserError || !email) {
-        if (authUserError) console.error("Username auth identity lookup failed", authUserError);
-        return json(401, invalidCredentials);
+      const verifiedRecoveryEmail = profile.recovery_email_verified_at
+        ? profile.recovery_email?.trim().toLowerCase() ?? ""
+        : "";
+
+      if (verifiedRecoveryEmail) {
+        email = verifiedRecoveryEmail;
+      } else {
+        const { data: authUserData, error: authUserError } =
+          await retryTransientSupabaseOperation(() => admin.auth.admin.getUserById(profile.id));
+        email = authUserData.user?.email ?? "";
+        if (authUserError) {
+          console.error("Username auth identity lookup failed", authUserError);
+          return json(
+            isTransientSupabaseError(authUserError) ? 503 : 401,
+            isTransientSupabaseError(authUserError)
+              ? { error: "Giriş hizmeti şu anda kullanılamıyor" }
+              : invalidCredentials,
+          );
+        }
+        if (!email) return json(401, invalidCredentials);
       }
       expectedUserId = profile.id;
     } else {
@@ -126,10 +178,11 @@ Deno.serve(async (req: Request) => {
       pendingExpiresAt = pending.expires_at;
     }
 
-    const { data: signInData, error: signInError } = await authClient.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { data: signInData, error: signInError } =
+      await retryTransientSupabaseOperation(() => authClient.auth.signInWithPassword({
+        email,
+        password,
+      }));
     if (signInError) {
       if (pendingRegistrationKind && signInError.code === "email_not_confirmed") {
         return json(403, {
@@ -140,6 +193,10 @@ Deno.serve(async (req: Request) => {
           maskedEmail: maskEmail(email),
           expiresAt: pendingExpiresAt,
         });
+      }
+      if (isTransientSupabaseError(signInError)) {
+        console.error("Username password sign-in temporarily unavailable", signInError);
+        return json(503, { error: "Giriş hizmeti şu anda kullanılamıyor" });
       }
       return json(401, invalidCredentials);
     }
