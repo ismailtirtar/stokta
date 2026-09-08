@@ -7,6 +7,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { normalizeUsername, supabase } from "../lib/supabase";
+import { retryTransientSupabaseOperation } from "../lib/auth-retry";
 import AccountModal from "../components/AccountModal";
 import ContentReportModal from "../components/ContentReportModal";
 import ForcedPasswordChange from "../components/ForcedPasswordChange";
@@ -77,11 +78,11 @@ export default function InventoryScreen({ session }: { session: Session }) {
 
   const loadData = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
-    const profileResult = await supabase
+    const profileResult = await retryTransientSupabaseOperation(() => supabase
       .from("profiles")
       .select("display_name,username,role,organization_id,is_platform_operator,must_change_password,ugc_terms_version,ugc_terms_accepted_at,organizations(name,subscription_status,trial_ends_at,current_period_end)")
       .eq("id", session.user.id)
-      .maybeSingle();
+      .maybeSingle());
 
     if (profileResult.error || !profileResult.data?.organization_id) {
       const profileError = profileResult.error?.message ?? "İşletme profili bulunamadı.";
