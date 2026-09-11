@@ -30,7 +30,7 @@
     <div>
       <div class="brand"><span class="mark">S</span> Stokdaş</div>
       <h1>Gizlilik Politikası</h1>
-      <p>Yürürlük tarihi: 29 Ağustos 2026</p>
+      <p>Yürürlük tarihi: 11 Eylül 2026</p>
     </div>
   </header>
   <main>
@@ -42,27 +42,31 @@
     <section>
       <h2>İşlenen veriler</h2>
       <p>İşletme adı; kullanıcı adı, ad ve soyad, kayıt sırasında sağlanan kurtarma e-postası ve doğrulama durumu, hesap rolü, kabul edilen kullanım koşulları sürümü ve kabul zamanı, oturum ve güvenlik kayıtları; ürün adı ve kodu, kategori, birim, stok miktarı, stok hareketi notu, işlemi yapan kullanıcı ve işlem zamanı işlenir.</p>
+      <p>Google Play aboneliği kullanıldığında abonelik ürünü ve planı, satın alma ve yenileme durumu, abonelik dönemi, Google Play'in sağladığı satın alma belirteci ve sipariş referansı işlenir. Satın alma belirteci yalnız sunucu tarafında şifreli tutulur; belirteç ve sipariş referanslarının geri döndürülemez özetleri sahiplik doğrulaması, tekrar işlemeyi önleme, geri ödeme/iptal denetimi ve kayıt bütünlüğü için kullanılabilir. Kart numarası veya ödeme yöntemi bilgisi Stokdaş'a aktarılmaz.</p>
       <p>Bir ürün, stok hareketi notu veya kullanıcı bildirildiğinde bildiren hesap ve görünen adı; hedefin türü ve dahili kimliği; seçilen neden; en fazla 1000 karakterlik isteğe bağlı açıklama; hedef etiketi; sunucunun bildirim anında kayıtlı hedef veriden ürettiği en fazla 1000 karakterlik içerik kanıt kopyası; bildirimin durumu; inceleyen yöneticinin görünen adı, isteğe bağlı moderasyon notu, uygulanan işlem ve işlem zamanı işlenir. Kanıt kopyası kullanıcı tarafından gönderilmez ve kullanıcı tarafından değiştirilemez.</p>
       <p>Kötüye kullanımı sınırlandırmak için ağ adresinin geri döndürülemeyen özeti güvenlik kontrollerinde kullanılabilir. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</p>
     </section>
     <section>
       <h2>Kullanım amacı ve hizmet sağlayıcı</h2>
-      <p>Veriler yalnızca kimlik doğrulama, e-posta doğrulama, hesap kurtarma, işletme hesabı açma, ortak stok takibi, abonelik yönetimi, yetkilendirme, güvenlik, işlem geçmişi ve içerik kurallarının uygulanması amaçlarıyla kullanılır. İçerik bildirimleri ve sunucu tarafından üretilen kanıt kopyaları, bildirilen ürün, hareket notu veya kullanıcıyı bildirim anındaki hâliyle incelemek; gerektiğinde ürünü kaldırmak, notu gizlemek ya da çalışan hesabını devre dışı bırakmak; kötüye kullanımı önlemek ve moderasyon kararını kanıtlamak için kullanılır. Reklam, satış, davranışsal takip veya analiz yapılmaz.</p>
+      <p>Veriler yalnızca kimlik doğrulama, e-posta doğrulama, hesap kurtarma, işletme hesabı açma, ortak stok takibi, aboneliği Google Play ile doğrulama ve yaşam döngüsünü eşitleme, yetkilendirme, güvenlik, işlem geçmişi ve içerik kurallarının uygulanması amaçlarıyla kullanılır. İçerik bildirimleri ve sunucu tarafından üretilen kanıt kopyaları, bildirilen ürün, hareket notu veya kullanıcıyı bildirim anındaki hâliyle incelemek; gerektiğinde ürünü kaldırmak, notu gizlemek ya da çalışan hesabını devre dışı bırakmak; kötüye kullanımı önlemek ve moderasyon kararını kanıtlamak için kullanılır. Reklam, satış, davranışsal takip veya analiz yapılmaz.</p>
+      <p>Abonelik işlemi Google Play tarafından yürütülür. Abonelik doğrulaması, yenileme, iptal, geri ödeme ve erişim durumunun eşitlenmesi için gerekli satın alma verileri Google Play ile alışveriş edilir. Google Play ve Supabase kendi hizmet koşulları ve gizlilik uygulamaları kapsamında hizmet sağlayıcı olarak işlem yapar.</p>
       <p>Bulut veritabanı ve kimlik doğrulama altyapısı için Supabase hizmet sağlayıcı olarak kullanılır. Uygulama verileri Frankfurt bölgesindeki sunucularda tutulur.</p>
     </section>
     <section>
       <h2>Güvenlik ve saklama</h2>
       <p>Aktarım sırasında HTTPS/TLS kullanılır. Veritabanında satır düzeyi güvenlik, rol tabanlı yetkilendirme ve sunucu tarafında atomik stok işlemleri uygulanır. Hizmet rolü anahtarı mobil uygulamada bulunmaz.</p>
-      <p>Hesap ve stok verileri, ilgili hesap veya işletme çalışma alanı silinene kadar saklanır. İçerik bildirimi; neden, açıklama, hedef etiketi, sunucu tarafından üretilen kanıt kopyası, inceleme durumu ve moderasyon kararıyla birlikte ilgili işletme çalışma alanı var olduğu sürece saklanır. Bildirilen ürün veya stok hareketi daha önce kaldırılmış olsa bile kanıt kopyası inceleme geçmişini korumak için bildirim kaydında kalır. İşletme çalışma alanı silindiğinde o işletmeye ait içerik bildirimleri, açıklamalar ve kanıt kopyaları da kalıcı olarak silinir.</p>
+      <p>Hesap ve stok verileri, ilgili hesap veya işletmenin aktif çalışma alanı silinene kadar saklanır. İçerik bildirimi; neden, açıklama, hedef etiketi, sunucu tarafından üretilen kanıt kopyası, inceleme durumu ve moderasyon kararıyla birlikte ilgili işletme çalışma alanı var olduğu sürece saklanır. Bildirilen ürün veya stok hareketi daha önce kaldırılmış olsa bile kanıt kopyası inceleme geçmişini korumak için bildirim kaydında kalır. İşletme çalışma alanı silindiğinde o işletmeye ait aktif içerik bildirimleri, açıklamalar ve kanıt kopyaları kaldırılır.</p>
+      <p>Şifreli Google Play satın alma belirteci normal abonelik yaşam döngüsünü eşitlemek için süreli olarak saklanır. Hesap veya işletme silme sonrasında yenilemeyi durdurma, iptal/geri ödeme olayını işleme ve silinen sahipliğe yeniden erişim verilmesini engelleme amacıyla gereken şifreli belirteç en fazla 30 gün daha ve hiçbir durumda ilk saklandığı tarihten itibaren 120 günden uzun tutulmaz; işlem güvenle tamamlandığında daha erken silinir. Geri döndürülemez belirteç, sipariş veya silinen kimlik özetleri dolandırıcılığı ve yanlış yeniden bağlamayı önlemek için 120 güne kadar tutulabilir.</p>
       <p>Ayrı güvenlik denetim olayları; kötüye kullanımın araştırılması, hizmet güvenliği ve yasal yükümlülükler için işletme veya kullanıcı hesabı silindikten sonra da saklanabilir ve bunlara otomatik süre sonu uygulanmaz. Bu olaylar bildirilen ham içeriği, içerik kanıt kopyasını, bildirenin açıklamasını veya moderasyon notunu içermez; yalnızca olay türü, dahili kayıt kimlikleri, hedef türü, seçilen neden/işlem ve zaman gibi teknik verileri içerir. Silinen kullanıcıya veya işletmeye bağlı doğrudan veritabanı ilişkileri silinir ya da boşaltılır; kullanıcı hedef kimliği de ilgili denetim olayından çıkarılır. Bu kayıtların erişimi hizmet rolüyle sınırlandırılır.</p>
     </section>
     <section>
       <h2>İçerik bildirimleri ve moderasyon</h2>
       <p>Ürünler, stok hareketi notları ve kullanıcılar yalnızca aynı işletme çalışma alanındaki yetkili kullanıcılar tarafından görülebilir. Bir kullanıcı uygulama içindeki bildirme özelliğini kullandığında sunucu oturumu, işletme üyeliğini ve hedef kaydı doğrular; hedef etiketi ile içerik kanıt kopyasını doğrudan veritabanındaki hedeften üretir. Mobil uygulama işletme kimliğini veya kanıt kopyasını belirleyemez.</p>
-      <p>Bildirim tablosuna mobil istemciden doğrudan erişilemez. Bildirim ayrıntıları yalnızca kimliği doğrulanmış aynı işletme yöneticisine, yetkili inceleme işlemi üzerinden gösterilir. Yönetici bildirimi işlem gerektirmediği gerekçesiyle kapatabilir, ürünü etkin listeden kaldırabilir, hareket notunu gizleyebilir veya çalışan hesabını devre dışı bırakabilir. Yönetici kendi hakkındaki bildirimi çözemez; yönetici ve platform yöneticisi hakkındaki şikâyetler destek kanalı üzerinden ele alınır.</p>
+      <p>Bildirim tablosuna mobil istemciden doğrudan erişilemez. Çalışan hesabıyla ilişkili içerikler yalnız kimliği doğrulanmış aynı işletme yöneticisinin inceleme kuyruğuna gider. Yönetici bildirimi işlem gerektirmediği gerekçesiyle kapatabilir, ürünü etkin listeden kaldırabilir, hareket notunu gizleyebilir veya çalışan hesabını devre dışı bırakabilir. İşletme yöneticisi ya da platform yöneticisi hesabıyla ilişkili içerikler çıkar çatışmasını önlemek için yalnız yetkili Stokdaş platform inceleme kuyruğuna yönlendirilir; platform incelemesi ilgili içeriği kaldırabilir, işletmeyi idari olarak askıya alabilir veya bildirimi kapatabilir.</p>
       <p>Bildirim verileri hizmetin güvenliğini sağlamak, kötüye kullanımı önlemek ve inceleme kararını kaydetmek için kullanılır. Reklam amacıyla kullanılmaz ve diğer işletmelerle paylaşılmaz.</p>
     </section>
-    <section id="hesap-silme" class="warning">
+    <section id="hesap-ve-veri-silme" class="warning">
+      <span id="hesap-silme" aria-hidden="true"></span>
       <h2>Hesap ve veri silme</h2>
       <h3>Uygulama içinden</h3>
       <ol>
@@ -71,11 +75,11 @@
         <li>Sağ üstteki profil simgesine dokunun.</li>
         <li>Çalışan hesabında “Hesabımı sil”, yönetici hesabında “İşletmeyi ve hesapları sil” seçeneğini açın.</li>
         <li>Çalışansanız kullanıcı adınızı, yöneticiyseniz <strong>STOKDAŞ</strong> metnini ve mevcut şifrenizi girin.</li>
-        <li>Kalıcı silme düğmesine dokunarak işlemi onaylayın.</li>
+        <li>Silme işlemini başlatan düğmeye dokunup sunucu onayını bekleyin.</li>
       </ol>
       <p>Çalışan hesabı silindiğinde ad, kullanıcı adı, kurtarma e-postası ve giriş hesabı kaldırılır. Ortak stok kayıtlarının bütünlüğü için geçmiş hareketlerde kullanıcı kimliği boşaltılır ve işlemi yapan kişi yalnızca <strong>Silinmiş kullanıcı</strong> adıyla kalır. Çalışanın oluşturduğu ürünlerin sahipliği etkin işletme yöneticisine aktarılır.</p>
       <p>Silinen çalışan bir bildirimi yaptıysa bildirenin kimliği boşaltılır, adı <strong>Silinmiş kullanıcı</strong> olur ve kendi yazdığı bildirim açıklaması silinir. Bildirim silinen çalışanı hedefliyorsa hedef kimliği boşaltılır; hedef etiketi ve kullanıcı kanıt kopyası <strong>Silinmiş kullanıcı</strong> olarak değiştirilir. Silinen çalışan bir bildirimi çözdüyse çözen kimliği boşaltılır, adı <strong>Silinmiş kullanıcı</strong> olur ve moderasyon notu silinir. Bildirimin nedeni, durumu, uygulanan işlem ve kullanıcıya ait olmayan içerik kanıtı işletme silinene kadar korunur.</p>
-      <p>Yönetici hesabıyla <strong>İşletmeyi ve hesapları sil</strong> işlemi yapıldığında yalnızca o işletmenin ürünleri, stok hareketleri, kullanıcı hesapları, içerik bildirimleri ve bildirim kanıt kopyaları kalıcı olarak silinir; diğer işletmeler etkilenmez. Ham kullanıcı içeriği içermeyen ayrı güvenlik denetim olaylarının saklanması yukarıdaki <strong>Güvenlik ve saklama</strong> bölümünde açıklanmıştır.</p>
+      <p>Yönetici hesabıyla <strong>İşletmeyi ve hesapları sil</strong> işlemi yapıldığında yalnızca o işletmenin aktif çalışma alanı, ürünleri, stok hareketleri, kullanıcı erişimleri, içerik bildirimleri ve bildirim kanıt kopyaları kaldırılır; diğer işletmeler etkilenmez. Google Play ve ham kullanıcı içeriği içermeyen sınırlı güvenlik kayıtlarının saklanması yukarıdaki <strong>Güvenlik ve saklama</strong> bölümünde açıklanmıştır. Bilinen otomatik yenilenen abonelik için Stokdaş Google Play'e yenilemeyi durdurma talebi gönderir; mağaza yanıtı doğrulanamazsa silme başarıyla tamamlanmış sayılmaz ve kullanıcıya hata gösterilir. Kullanıcı ayrıca Google Play hesabındaki Abonelikler bölümünü kontrol etmelidir.</p>
       <p>Platform yöneticisi hesabı güvenlik nedeniyle uygulama içinden silinemez; bu hesap için aşağıdaki destek kanalından talep oluşturulmalıdır.</p>
       <h3>Uygulamaya erişemiyorsanız</h3>
       <p>Mümkünse hesabınızın doğrulanmış kurtarma e-posta adresinden <a href="mailto:tirtarismail@gmail.com?subject=Stokda%C5%9F%20hesap%20silme%20talebi">destek e-postasına</a> “Stokdaş hesap silme talebi” konusuyla kullanıcı adınızı gönderin. Kimlik doğrulamasından sonra talep en geç 30 gün içinde tamamlanır. Şifrenizi veya doğrulama kodunuzu e-postayla göndermeyin.</p>

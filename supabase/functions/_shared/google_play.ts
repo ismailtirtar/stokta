@@ -54,6 +54,16 @@ export type VerifiedGooglePlaySubscription = {
   isTestPurchase: boolean;
   latestSuccessfulOrderId: string | null;
   entitled: boolean;
+  externalAccountId: string | null;
+  externalProfileId: string | null;
+  linkedPurchaseToken: string | null;
+  startTime: string | null;
+};
+
+export type GooglePlayVoidedPurchase = {
+  purchaseToken: string;
+  orderId: string;
+  voidedTimeMillis: number;
 };
 
 export type GooglePlayErrorCode =
@@ -231,20 +241,31 @@ function normalizedTimestamp(value: unknown, required: boolean) {
   return { iso: new Date(milliseconds).toISOString(), milliseconds };
 }
 
+function validateOptionalPurchaseToken(value: unknown) {
+  if (value === undefined || value === null) return null;
+  return validateGooglePlayPurchaseToken(value);
+}
+
 function validateSubscriptionResponse(
   raw: Record<string, unknown>,
-  expectedAccountId: string,
-  expectedProfileId: string,
+  expectedAccountId: string | null,
+  expectedProfileId: string | null,
   nowMilliseconds: number,
 ): VerifiedGooglePlaySubscription {
-  validateHash(expectedAccountId, "Hesap özeti");
-  validateHash(expectedProfileId, "İşletme özeti");
+  if ((expectedAccountId === null) !== (expectedProfileId === null)) {
+    throw new GooglePlayError("INVALID_REQUEST", 400, "Google Play kimlik beklentisi geçersiz");
+  }
+  if (expectedAccountId !== null && expectedProfileId !== null) {
+    validateHash(expectedAccountId, "Hesap özeti");
+    validateHash(expectedProfileId, "İşletme özeti");
+  }
 
   const stateValue = raw.subscriptionState;
   if (typeof stateValue !== "string" || !subscriptionStates.has(stateValue as never)) {
     throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play abonelik durumu geçersiz");
   }
   const subscriptionState = stateValue as GooglePlaySubscriptionState;
+  const startTime = normalizedTimestamp(raw.startTime, false);
 
   const acknowledgementValue = raw.acknowledgementState;
   if (typeof acknowledgementValue !== "string"
@@ -253,17 +274,7 @@ function validateSubscriptionResponse(
   }
   const acknowledgementState = acknowledgementValue as GooglePlayAcknowledgementState;
 
-  if (raw.linkedPurchaseToken !== undefined && raw.linkedPurchaseToken !== null) {
-    // This first release has one immutable base plan and no token-replacement
-    // flow. A linked token must be reconciled against the private ledger before
-    // it can ever affect entitlement; rejecting here leaves current access
-    // unchanged.
-    throw new GooglePlayError(
-      "INVALID_PURCHASE",
-      409,
-      "Bağlantılı Google Play aboneliği henüz desteklenmiyor",
-    );
-  }
+  const linkedPurchaseToken = validateOptionalPurchaseToken(raw.linkedPurchaseToken);
   if (raw.outOfAppPurchaseContext !== undefined && raw.outOfAppPurchaseContext !== null) {
     throw new GooglePlayError(
       "INVALID_PURCHASE",
@@ -273,9 +284,22 @@ function validateSubscriptionResponse(
   }
 
   const externalIdentifiers = raw.externalAccountIdentifiers;
-  if (!isRecord(externalIdentifiers)
-    || externalIdentifiers.obfuscatedExternalAccountId !== expectedAccountId
-    || externalIdentifiers.obfuscatedExternalProfileId !== expectedProfileId) {
+  if (externalIdentifiers !== undefined && externalIdentifiers !== null
+    && !isRecord(externalIdentifiers)) {
+    throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play satın alma kimliği geçersiz");
+  }
+  const externalAccountId = isRecord(externalIdentifiers)
+    && typeof externalIdentifiers.obfuscatedExternalAccountId === "string"
+    && HASH_PATTERN.test(externalIdentifiers.obfuscatedExternalAccountId)
+    ? externalIdentifiers.obfuscatedExternalAccountId
+    : null;
+  const externalProfileId = isRecord(externalIdentifiers)
+    && typeof externalIdentifiers.obfuscatedExternalProfileId === "string"
+    && HASH_PATTERN.test(externalIdentifiers.obfuscatedExternalProfileId)
+    ? externalIdentifiers.obfuscatedExternalProfileId
+    : null;
+  if (expectedAccountId !== null && expectedProfileId !== null
+    && (externalAccountId !== expectedAccountId || externalProfileId !== expectedProfileId)) {
     throw new GooglePlayError("IDENTITY_MISMATCH", 403, "Google Play satın alma kimliği eşleşmiyor");
   }
 
@@ -334,6 +358,10 @@ function validateSubscriptionResponse(
     isTestPurchase: testPurchase !== undefined && testPurchase !== null,
     latestSuccessfulOrderId: typeof orderId === "string" ? orderId : null,
     entitled,
+    externalAccountId,
+    externalProfileId,
+    linkedPurchaseToken,
+    startTime: startTime.iso,
   };
 }
 
@@ -434,6 +462,82 @@ export class GooglePlayClient {
     );
   }
 
+  async inspectSubscription(purchaseTokenValue: unknown) {
+    const purchaseToken = validateGooglePlayPurchaseToken(purchaseTokenValue);
+    const raw = await this.getRawSubscription(purchaseToken);
+    return validateSubscriptionResponse(raw, null, null, Date.now());
+  }
+
+  async cancelSubscription(purchaseTokenValue: unknown) {
+    const purchaseToken = validateGooglePlayPurchaseToken(purchaseTokenValue);
+    const url = `${GOOGLE_ANDROID_PUBLISHER_ROOT}/applications/${
+      encodeURIComponent(GOOGLE_PLAY_PACKAGE_NAME)
+    }/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}:cancel`;
+    const response = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.#accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        cancellationContext: {
+          cancellationType: "DEVELOPER_REQUESTED_STOP_PAYMENTS",
+        },
+      }),
+    });
+    if (!response.ok) mapPublisherError(response.status);
+  }
+
+  async listVoidedPurchases(startTimeMillis: number, pageToken: string | null) {
+    if (!Number.isSafeInteger(startTimeMillis) || startTimeMillis < 0
+      || (pageToken !== null
+        && (pageToken.length < 1 || pageToken.length > 4_096 || /[\u0000-\u001f\u007f]/.test(pageToken)))) {
+      throw new GooglePlayError("INVALID_REQUEST", 400, "Geçersiz iade uzlaştırma imleci");
+    }
+    const url = new URL(
+      `${GOOGLE_ANDROID_PUBLISHER_ROOT}/applications/${
+        encodeURIComponent(GOOGLE_PLAY_PACKAGE_NAME)
+      }/purchases/voidedpurchases`,
+    );
+    url.searchParams.set("type", "1");
+    // Keep the void-first worker inside its Edge runtime budget; page tokens
+    // preserve completeness across the five-minute schedule.
+    url.searchParams.set("maxResults", "25");
+    if (pageToken) url.searchParams.set("token", pageToken);
+    else url.searchParams.set("startTime", String(startTimeMillis));
+    const response = await fetchWithTimeout(url.toString(), {
+      method: "GET",
+      headers: { Authorization: `Bearer ${this.#accessToken}`, Accept: "application/json" },
+    });
+    if (!response.ok) mapPublisherError(response.status);
+    const raw = await parseJsonObject(response);
+    const items = raw.voidedPurchases === undefined ? [] : raw.voidedPurchases;
+    if (!Array.isArray(items) || items.length > 25) {
+      throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play iade listesi geçersiz");
+    }
+    const purchases: GooglePlayVoidedPurchase[] = items.map((item) => {
+      if (!isRecord(item)) throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play iade kaydı geçersiz");
+      const purchaseToken = validateGooglePlayPurchaseToken(item.purchaseToken);
+      if (typeof item.orderId !== "string" || item.orderId.length < 1 || item.orderId.length > 256
+        || typeof item.voidedTimeMillis !== "string" || !/^\d{10,16}$/.test(item.voidedTimeMillis)) {
+        throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play iade kaydı geçersiz");
+      }
+      const voidedTimeMillis = Number(item.voidedTimeMillis);
+      if (!Number.isSafeInteger(voidedTimeMillis)) {
+        throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play iade zamanı geçersiz");
+      }
+      return { purchaseToken, orderId: item.orderId, voidedTimeMillis };
+    });
+    const pagination = raw.tokenPagination;
+    const nextPageToken = isRecord(pagination) && typeof pagination.nextPageToken === "string"
+      ? pagination.nextPageToken
+      : null;
+    if (nextPageToken !== null && (nextPageToken.length > 4_096 || /[\u0000-\u001f\u007f]/.test(nextPageToken))) {
+      throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play iade imleci geçersiz");
+    }
+    return { purchases, nextPageToken };
+  }
+
   async acknowledgeSubscription(purchaseTokenValue: unknown) {
     const purchaseToken = validateGooglePlayPurchaseToken(purchaseTokenValue);
     const url = `${GOOGLE_ANDROID_PUBLISHER_ROOT}/applications/${
@@ -450,15 +554,10 @@ export class GooglePlayClient {
       },
       body: "{}",
     });
-    if (response.ok) return;
-
-    // A concurrent retry may have acknowledged the same purchase after our
-    // initial GET. Re-read the resource instead of treating that race as a
-    // payment failure.
-    if (response.status === 400 || response.status === 409) {
-      const current = await this.getRawSubscription(purchaseToken);
-      if (current.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED") return;
-    }
+    // A 400/409 can mean a retry raced an already-completed ACK. The caller
+    // must always perform and ledger a full post-ACK subscriptionsv2.get under
+    // the same observation lease; status alone is never treated as proof.
+    if (response.ok || response.status === 400 || response.status === 409) return;
     mapPublisherError(response.status);
   }
 
@@ -473,4 +572,30 @@ export class GooglePlayClient {
     if (!response.ok) mapPublisherError(response.status);
     return await parseJsonObject(response);
   }
+}
+
+export async function authorizeGooglePlayPush(req: Request) {
+  const expectedAudience = Deno.env.get("GOOGLE_PLAY_RTDN_AUDIENCE") ?? "";
+  const expectedEmail = Deno.env.get("GOOGLE_PLAY_RTDN_SERVICE_ACCOUNT") ?? "";
+  const authorization = req.headers.get("authorization") ?? "";
+  const match = authorization.match(/^Bearer ([A-Za-z0-9._~-]{20,4096})$/);
+  if (!expectedAudience || expectedAudience.length > 2048
+    || !expectedEmail || expectedEmail.length > 320 || !match) return false;
+  const identityToken = match[1];
+  if (!identityToken) return false;
+
+  const response = await fetchWithTimeout(
+    `${GOOGLE_OAUTH_TOKEN_URL}info?id_token=${encodeURIComponent(identityToken)}`,
+    { method: "GET", headers: { Accept: "application/json" } },
+  );
+  if (!response.ok) return false;
+  const claims = await parseJsonObject(response);
+  const expiresAt = typeof claims.exp === "string" ? Number(claims.exp) : claims.exp;
+  return claims.aud === expectedAudience
+    && claims.email === expectedEmail
+    && (claims.email_verified === "true" || claims.email_verified === true)
+    && ["accounts.google.com", "https://accounts.google.com"].includes(String(claims.iss))
+    && typeof expiresAt === "number"
+    && Number.isFinite(expiresAt)
+    && expiresAt > Math.floor(Date.now() / 1000);
 }

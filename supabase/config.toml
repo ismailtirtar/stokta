@@ -39,3 +39,15 @@ verify_jwt = true
 
 [functions.verify-play-subscription]
 verify_jwt = true
+
+# These service endpoints deliberately bypass the Supabase JWT gateway because
+# they authenticate a Google-signed Pub/Sub OIDC token or a dedicated,
+# constant-time compared scheduler secret inside the handler.
+[functions.google-play-rtdn]
+verify_jwt = false
+
+[functions.google-play-reconcile]
+verify_jwt = false
+
+[functions.account-auth-cleanup]
+verify_jwt = false

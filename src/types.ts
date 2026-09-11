@@ -16,6 +16,7 @@ export type ProfileRole = "admin" | "member";
 
 export type Movement = {
   id: string;
+  event_sequence?: number;
   organization_id?: string;
   product_id: string;
   type: "in" | "out";

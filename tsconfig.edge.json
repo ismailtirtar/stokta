@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "npm:@supabase/supabase-js@2.112.3": ["node_modules/@supabase/supabase-js/dist/index.d.mts"],
+      "jsr:@supabase/functions-js/edge-runtime.d.ts": ["supabase/functions/edge-runtime-local.d.ts"]
+    }
+  },
+  "include": ["supabase/functions/**/*.ts", "supabase/functions/edge-runtime-local.d.ts"]
+}

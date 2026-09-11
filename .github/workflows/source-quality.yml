@@ -1,0 +1,50 @@
+name: Stokdaş Source Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: stokdas-source-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, test and bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify application and Edge Function types
+        run: npm run typecheck
+
+      - name: Verify strict TypeScript hygiene
+        run: npm run typecheck:strict
+
+      - name: Run contract tests
+        run: npm test
+
+      - name: Verify Expo dependencies
+        run: npx expo install --check
+
+      - name: Export the Android bundle
+        run: npm run export:android

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { ComponentProps } from "react";
+import { randomUUID } from "expo-crypto";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,14 +15,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { normalizeUsername, supabase } from "../lib/supabase";
-import { retryTransientSupabaseOperation } from "../lib/auth-retry";
-import { CURRENT_UGC_TERMS_VERSION } from "../lib/ugc";
+import { retryTransientSupabaseOperation, withOperationTimeout } from "../lib/auth-retry";
+import { CURRENT_UGC_TERMS_DIGEST, CURRENT_UGC_TERMS_VERSION } from "../lib/ugc";
 import TermsModal from "../components/TermsModal";
 
 type Mode = "signIn" | "register";
 type RecoveryStage = "request" | "verify" | "complete";
 
-const privacyUrl = "https://stokdas.tirtarhan.chatgpt.site/gizlilik";
+const privacyUrl = "https://stokdas.com/gizlilik";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+type RegistrationAttempt = { signature: string; requestId: string };
 
 export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>("signIn");
@@ -48,6 +51,8 @@ export default function LoginScreen() {
   const [registrationTermsAccepted, setRegistrationTermsAccepted] = useState(false);
   const [termsModal, setTermsModal] = useState(false);
   const signInInFlight = useRef(false);
+  const registrationInFlight = useRef(false);
+  const registrationAttemptRef = useRef<RegistrationAttempt | null>(null);
 
   const isRegister = mode === "register";
   const isVerification = Boolean(verificationUsername);
@@ -68,6 +73,16 @@ export default function LoginScreen() {
     setNewPassword("");
     setNewPasswordAgain("");
     setRegistrationTermsAccepted(false);
+  }
+
+  async function openPrivacyPolicy() {
+    try {
+      const supported = await Linking.canOpenURL(privacyUrl);
+      if (!supported) throw new Error("unsupported");
+      await Linking.openURL(privacyUrl);
+    } catch {
+      setError("Gizlilik Politikası açılamadı. stokdas.com/gizlilik adresini tarayıcınızda açabilirsiniz.");
+    }
   }
 
   async function useSession(data: unknown) {
@@ -111,9 +126,7 @@ export default function LoginScreen() {
     setNotice("");
 
     try {
-      const { data, error: authError } = await supabase.functions.invoke("username-login", {
-        body: { username: normalizedUsername, password },
-      });
+      const { data, error: authError } = await invokeAuthFunction("username-login", { username: normalizedUsername, password });
       if (authError) {
         const details = await edgeFunctionErrorDetails(authError);
         if (details.code === "EMAIL_VERIFICATION_REQUIRED") {
@@ -137,6 +150,7 @@ export default function LoginScreen() {
   }
 
   async function registerBusiness() {
+    if (registrationInFlight.current) return;
     const normalizedUsername = normalizeUsername(username);
     const normalizedEmail = recoveryEmail.trim().toLowerCase();
     if (organizationName.trim().length < 2) {
@@ -168,30 +182,66 @@ export default function LoginScreen() {
       return;
     }
 
+    const registrationSignature = JSON.stringify({
+      organizationName: organizationName.trim(),
+      displayName: displayName.trim(),
+      recoveryEmail: normalizedEmail,
+      username: normalizedUsername,
+      password,
+      ugcTermsVersion: CURRENT_UGC_TERMS_VERSION,
+      ugcTermsDigest: CURRENT_UGC_TERMS_DIGEST,
+    });
+    const requestId = registrationAttemptRef.current?.signature === registrationSignature
+      ? registrationAttemptRef.current.requestId
+      : randomUUID();
+    registrationAttemptRef.current = { signature: registrationSignature, requestId };
+
+    registrationInFlight.current = true;
     setLoading(true);
     setError("");
     setNotice("");
-    const { error: registrationError } = await supabase.functions.invoke("register-business", {
-      body: {
-        organizationName: organizationName.trim(),
-        displayName: displayName.trim(),
-        username: normalizedUsername,
-        recoveryEmail: normalizedEmail,
-        password,
-        ugcTermsAccepted: true,
-        ugcTermsVersion: CURRENT_UGC_TERMS_VERSION,
-      },
-    });
-    setLoading(false);
-    if (registrationError) {
-      setError(await edgeFunctionError(registrationError));
-      return;
-    }
+    try {
+      const { data: registrationData, error: registrationError } = await retryTransientSupabaseOperation(() => supabase.functions.invoke("register-business", { body: {
+          organizationName: organizationName.trim(),
+          displayName: displayName.trim(),
+          username: normalizedUsername,
+          recoveryEmail: normalizedEmail,
+          password,
+          ugcTermsAccepted: true,
+          ugcTermsVersion: CURRENT_UGC_TERMS_VERSION,
+          ugcTermsDigest: CURRENT_UGC_TERMS_DIGEST,
+          requestId,
+      } }));
+      if (registrationError) {
+        setError(await edgeFunctionError(registrationError));
+        return;
+      }
+      const registrationResult = registrationData as {
+        accepted?: unknown;
+        verificationRequired?: unknown;
+        requestId?: unknown;
+      } | null;
+      if (registrationResult?.accepted !== true
+        || registrationResult.verificationRequired !== true
+        || typeof registrationResult.requestId !== "string"
+        || !UUID_PATTERN.test(registrationResult.requestId)) {
+        setError("Kayıt isteğinin sunucu onayı doğrulanamadı. Aynı bilgilerle yeniden deneyin.");
+        return;
+      }
+      registrationAttemptRef.current = {
+        signature: registrationSignature,
+        requestId: registrationResult.requestId,
+      };
+      registrationAttemptRef.current = null;
 
-    setVerificationUsername(normalizedUsername);
-    setVerificationPassword(password);
-    setMaskedEmail(null);
-    setVerificationCode("");
+      setVerificationUsername(normalizedUsername);
+      setVerificationPassword(password);
+      setMaskedEmail(null);
+      setVerificationCode("");
+    } finally {
+      registrationInFlight.current = false;
+      setLoading(false);
+    }
   }
 
   async function verifyEmail() {
@@ -202,15 +252,14 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError("");
-    const { data, error: verificationError } = await supabase.functions.invoke("verify-email-code", {
-      body: { username: verificationUsername, code },
-    });
-    setLoading(false);
+    const { data, error: verificationError } = await invokeAuthFunction("verify-email-code", { username: verificationUsername, code });
     if (verificationError) {
+      setLoading(false);
       setError(await edgeFunctionError(verificationError));
       return;
     }
     await useSession(data);
+    setLoading(false);
   }
 
   async function resendVerification() {
@@ -218,9 +267,7 @@ export default function LoginScreen() {
     setLoading(true);
     setError("");
     setNotice("");
-    const { data, error: resendError } = await supabase.functions.invoke("resend-email-code", {
-      body: { username: verificationUsername, password: verificationPassword },
-    });
+    const { data, error: resendError } = await invokeAuthFunction("resend-email-code", { username: verificationUsername, password: verificationPassword });
     setLoading(false);
     if (resendError) {
       setError(await edgeFunctionError(resendError));
@@ -238,9 +285,7 @@ export default function LoginScreen() {
     setLoading(true);
     setError("");
     setNotice("");
-    const { error: requestError } = await supabase.functions.invoke("request-password-reset", {
-      body: { identifier: recoveryIdentifier.trim() },
-    });
+    const { error: requestError } = await invokeAuthFunction("request-password-reset", { identifier: recoveryIdentifier.trim() });
     setLoading(false);
     if (requestError) {
       setError(await edgeFunctionError(requestError));
@@ -257,9 +302,7 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError("");
-    const { data, error: verificationError } = await supabase.functions.invoke("verify-password-reset-code", {
-      body: { identifier: recoveryIdentifier.trim(), code },
-    });
+    const { data, error: verificationError } = await invokeAuthFunction("verify-password-reset-code", { identifier: recoveryIdentifier.trim(), code });
     setLoading(false);
     if (verificationError) {
       setError(await edgeFunctionError(verificationError));
@@ -284,9 +327,7 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError("");
-    const { error: completionError } = await supabase.functions.invoke("complete-password-reset", {
-      body: { resetTicket, newPassword },
-    });
+    const { error: completionError } = await invokeAuthFunction("complete-password-reset", { resetTicket, newPassword });
     setLoading(false);
     if (completionError) {
       setError(await edgeFunctionError(completionError));
@@ -405,7 +446,7 @@ export default function LoginScreen() {
                 {isRegister ? <Text style={styles.help}>Hesabınız etkinleştirildikten sonra güncel koşul kabulü güvenli biçimde hesabınıza kaydedilir.</Text> : <Text style={styles.help}>Çalışan hesabınızı işletme yöneticiniz oluşturur.</Text>}
                 <View style={styles.policyLinks}>
                   <Pressable accessibilityRole="link" style={styles.privacyButton} onPress={() => setTermsModal(true)}><Text style={styles.privacyText}>Kullanım koşulları</Text></Pressable>
-                  <Pressable accessibilityRole="link" style={styles.privacyButton} onPress={() => void Linking.openURL(privacyUrl)}><Text style={styles.privacyText}>Gizlilik politikası</Text></Pressable>
+                  <Pressable accessibilityRole="link" accessibilityLabel="Stokdaş Gizlilik Politikasını tarayıcıda aç" style={styles.privacyButton} onPress={() => void openPrivacyPolicy()}><Text style={styles.privacyText}>Gizlilik politikası</Text></Pressable>
                 </View>
               </>
             )}
@@ -423,6 +464,18 @@ export default function LoginScreen() {
       />
     </SafeAreaView>
   );
+}
+
+async function invokeAuthFunction(functionName: string, body: Record<string, unknown>) {
+  try {
+    return await withOperationTimeout(
+      supabase.functions.invoke(functionName, { body }),
+      15_000,
+      "Kimlik doğrulama isteği zaman aşımına uğradı",
+    );
+  } catch (error) {
+    return { data: null, error };
+  }
 }
 
 function Field(props: ComponentProps<typeof TextInput> & { label: string }) {

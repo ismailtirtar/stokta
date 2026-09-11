@@ -6,7 +6,11 @@
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
-    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "typecheck": "npm run typecheck:app && npm run typecheck:edge",
+    "typecheck:app": "tsc --noEmit",
+    "typecheck:strict": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "typecheck:edge": "tsc -p tsconfig.edge.json",
     "export:android": "expo export --platform android",
     "build:apk": "eas build --platform android --profile preview",
     "build:play": "eas build --platform android --profile production"
@@ -28,5 +32,9 @@
   "devDependencies": {
     "@types/react": "~19.1.10",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "uuid": "11.1.1",
+    "postcss": "8.5.28"
   }
 }

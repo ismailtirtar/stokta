@@ -1,13 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import type { Session } from "@supabase/supabase-js";
+import { randomUUID } from "expo-crypto";
 import {
-  ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable,
+  ActivityIndicator, Alert, AppState, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable,
   RefreshControl, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { normalizeUsername, supabase } from "../lib/supabase";
-import { retryTransientSupabaseOperation } from "../lib/auth-retry";
+import { isTransientSupabaseError, retryTransientSupabaseOperation } from "../lib/auth-retry";
+import {
+  clearAccountDeletionIntent,
+  isDeletionRequestId,
+  readAccountDeletionIntent,
+  saveAccountDeletionIntent,
+} from "../lib/account-deletion";
 import AccountModal from "../components/AccountModal";
 import ContentReportModal from "../components/ContentReportModal";
 import ForcedPasswordChange from "../components/ForcedPasswordChange";
@@ -15,7 +22,7 @@ import PlatformModal from "../components/PlatformModal";
 import SafetyCenterModal from "../components/SafetyCenterModal";
 import SubscriptionModal from "../components/SubscriptionModal";
 import TermsModal from "../components/TermsModal";
-import { CURRENT_UGC_TERMS_VERSION } from "../lib/ugc";
+import { CURRENT_UGC_TERMS_DIGEST, CURRENT_UGC_TERMS_VERSION } from "../lib/ugc";
 import type {
   ContentReportReason,
   ContentReportTarget,
@@ -27,10 +34,221 @@ import type {
 
 const emptyDraft: ProductDraft = { name: "", sku: "", category: "Genel", unit: "adet", stock: "0", minStock: "0" };
 const numberFormatter = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 3 });
+const PRODUCT_PAGE_SIZE = 200;
+const MOVEMENT_PAGE_SIZE = 50;
+const CLEARABLE_DELETION_CODES = new Set([
+  "PURCHASE_INTENT_IN_PROGRESS",
+  "RESTORE_PURCHASES_REQUIRED",
+  "PLATFORM_ACCOUNT",
+  "INVALID_CONFIRMATION",
+  "PASSWORD_INVALID",
+  "PASSWORD_REQUIRED",
+  "INVALID_REQUEST",
+]);
+
+type QueryFailure = { code?: string; message?: string } | Error | unknown;
+type LoadResult<T> = { data: T; error: QueryFailure | null };
+type WriteAttempt = { signature: string; requestId: string };
+type ProductCursor = { name: string; id: string };
+type ProductPageResult = LoadResult<Product[]> & { nextCursor: ProductCursor | null; hasMore: boolean };
+type InventorySummary = { totalProducts: number; lowStockProducts: number; criticalProducts: number; todayMovements: number };
+
+async function loadProductPage(
+  organizationId: string,
+  cursor: ProductCursor | null,
+  query: string,
+  onlyLow: boolean,
+): Promise<ProductPageResult> {
+  const result = await retryTransientSupabaseOperation(() => supabase.rpc("list_inventory_products", {
+    p_after_name: cursor?.name ?? null,
+    p_after_id: cursor?.id ?? null,
+    p_limit: PRODUCT_PAGE_SIZE,
+    p_query: query || null,
+    p_only_low: onlyLow,
+  }));
+  if (result.error) {
+    if (isMissingRpc(result.error) && !query && !onlyLow) {
+      return loadProductPageDirectly(organizationId, cursor);
+    }
+    return { data: [], error: result.error, nextCursor: null, hasMore: false };
+  }
+
+  const page = Array.isArray(result.data) ? result.data : [];
+  const products: Product[] = [];
+  for (const raw of page) {
+    const product = normalizeProduct(raw);
+    if (!product) return { data: [], error: new Error("Sunucudan geçersiz ürün kaydı alındı."), nextCursor: null, hasMore: false };
+    products.push(product);
+  }
+  const lastProduct = products.at(-1);
+  return {
+    data: products,
+    error: null,
+    nextCursor: page.length === PRODUCT_PAGE_SIZE && lastProduct ? { name: lastProduct.name, id: lastProduct.id } : null,
+    hasMore: page.length === PRODUCT_PAGE_SIZE,
+  };
+}
+
+async function loadProductPageDirectly(organizationId: string, cursor: ProductCursor | null): Promise<ProductPageResult> {
+  let query = supabase.from("products")
+    .select("id,name,sku,category,unit,stock,min_stock,active,created_at,updated_at")
+    .eq("organization_id", organizationId)
+    .eq("active", true)
+    .order("id", { ascending: true })
+    .limit(PRODUCT_PAGE_SIZE);
+  if (cursor) query = query.gt("id", cursor.id);
+  const result = await retryTransientSupabaseOperation(() => query);
+  if (result.error) return { data: [], error: result.error, nextCursor: null, hasMore: false };
+  const page = Array.isArray(result.data) ? result.data : [];
+  const products: Product[] = [];
+  for (const raw of page) {
+    const product = normalizeProduct(raw);
+    if (!product) return { data: [], error: new Error("Sunucudan geçersiz ürün kaydı alındı."), nextCursor: null, hasMore: false };
+    products.push(product);
+  }
+  const lastProduct = products.at(-1);
+  return {
+    data: products,
+    error: null,
+    nextCursor: page.length === PRODUCT_PAGE_SIZE && lastProduct ? { name: lastProduct.name, id: lastProduct.id } : null,
+    hasMore: page.length === PRODUCT_PAGE_SIZE,
+  };
+}
+
+async function loadRecentMovements(organizationId: string): Promise<LoadResult<Movement[]>> {
+  const result = await retryTransientSupabaseOperation(() => supabase.rpc("list_stock_movements", {
+    p_before_sequence: null,
+    p_limit: MOVEMENT_PAGE_SIZE,
+  }));
+  if (result.error) {
+    if (!isMissingRpc(result.error)) return { data: [], error: result.error };
+    const fallback = await retryTransientSupabaseOperation(() => supabase.from("stock_movements")
+      .select("id,product_id,type,quantity,previous_stock,new_stock,note,actor_id,actor_name,created_at,products(name,sku,unit)")
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(MOVEMENT_PAGE_SIZE));
+    if (fallback.error) return { data: [], error: fallback.error };
+    return normalizeMovementPage(fallback.data);
+  }
+  return normalizeMovementPage(result.data);
+}
+
+async function loadInventorySummary(): Promise<LoadResult<InventorySummary>> {
+  const result = await retryTransientSupabaseOperation(() => supabase.rpc("get_inventory_summary"));
+  if (result.error) return { data: emptyInventorySummary(), error: result.error };
+  if (!result.data || typeof result.data !== "object") {
+    return { data: emptyInventorySummary(), error: new Error("Stok özeti doğrulanamadı.") };
+  }
+  const row = Array.isArray(result.data) ? result.data[0] : result.data;
+  if (!row || typeof row !== "object") return { data: emptyInventorySummary(), error: new Error("Stok özeti doğrulanamadı.") };
+  const candidate = row as Record<string, unknown>;
+  const summary = {
+    totalProducts: Number(candidate.total_products),
+    lowStockProducts: Number(candidate.low_stock_products),
+    criticalProducts: Number(candidate.critical_products),
+    todayMovements: Number(candidate.today_movements),
+  };
+  if (Object.values(summary).some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    return { data: emptyInventorySummary(), error: new Error("Stok özeti doğrulanamadı.") };
+  }
+  return { data: summary, error: null };
+}
+
+function normalizeProduct(value: unknown): Product | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const stock = Number(row.stock);
+  const minStock = Number(row.min_stock);
+  if (typeof row.id !== "string" || typeof row.name !== "string" || typeof row.sku !== "string"
+    || typeof row.category !== "string" || typeof row.unit !== "string"
+    || typeof row.created_at !== "string" || typeof row.updated_at !== "string"
+    || !Number.isFinite(stock) || !Number.isFinite(minStock)) return null;
+  return { ...row, stock, min_stock: minStock } as Product;
+}
+
+function normalizeMovementPage(value: unknown): LoadResult<Movement[]> {
+  const page = Array.isArray(value) ? value : [];
+  const movements: Movement[] = [];
+  for (const raw of page) {
+    if (!raw || typeof raw !== "object") return { data: [], error: new Error("Sunucudan geçersiz stok hareketi alındı.") };
+    const row = raw as Record<string, unknown>;
+    const quantity = Number(row.quantity);
+    const previousStock = Number(row.previous_stock);
+    const newStock = Number(row.new_stock);
+    if (typeof row.id !== "string" || typeof row.product_id !== "string"
+      || (row.type !== "in" && row.type !== "out") || !Number.isFinite(quantity)
+      || !Number.isFinite(previousStock) || !Number.isFinite(newStock)
+      || typeof row.actor_name !== "string" || typeof row.created_at !== "string") {
+      return { data: [], error: new Error("Sunucudan geçersiz stok hareketi alındı.") };
+    }
+    const joinedProduct = Array.isArray(row.products) ? row.products[0] : row.products;
+    const product = joinedProduct && typeof joinedProduct === "object"
+      ? joinedProduct as { name: string; sku: string; unit: string }
+      : typeof row.product_name === "string"
+        ? { name: row.product_name, sku: String(row.product_sku ?? ""), unit: String(row.product_unit ?? "") }
+        : null;
+    movements.push({
+      ...row,
+      quantity,
+      previous_stock: previousStock,
+      new_stock: newStock,
+      actor_id: typeof row.actor_id === "string" ? row.actor_id : null,
+      note: typeof row.note === "string" ? row.note : "",
+      products: product,
+      event_sequence: typeof row.event_sequence === "number" ? row.event_sequence : undefined,
+    } as Movement);
+  }
+  return { data: movements, error: null };
+}
+
+function compareProducts(left: Product, right: Product) {
+  return left.name.localeCompare(right.name, "tr-TR", { sensitivity: "base" }) || left.id.localeCompare(right.id);
+}
+
+function isMissingRpc(error: unknown) {
+  const candidate = error as { code?: string; message?: string };
+  return candidate?.code === "PGRST202" || candidate?.code === "42883"
+    || /function .* does not exist|schema cache/i.test(candidate?.message ?? "");
+}
+
+function readableQueryError(error: QueryFailure, fallback: string) {
+  const candidate = error as { message?: string; name?: string };
+  if (candidate?.name === "OperationTimeoutError" || /timeout|zaman aşımı/i.test(candidate?.message ?? "")) {
+    return "Sunucu yanıt vermedi. Bağlantınızı kontrol edip yeniden deneyin.";
+  }
+  return candidate?.message?.trim() || fallback;
+}
+
+function emptyInventorySummary(): InventorySummary {
+  return { totalProducts: 0, lowStockProducts: 0, criticalProducts: 0, todayMovements: 0 };
+}
+
+function requestIdForAttempt(ref: { current: WriteAttempt | null }, signature: string) {
+  if (ref.current?.signature === signature) return ref.current.requestId;
+  if (ref.current) return null;
+  const attempt = { signature, requestId: randomUUID() };
+  ref.current = attempt;
+  return attempt.requestId;
+}
+
+function isAmbiguousWriteError(error: unknown) {
+  const status = (error as { context?: { status?: number }; status?: number })?.context?.status
+    ?? (error as { status?: number })?.status;
+  return isTransientSupabaseError(error, status);
+}
+
+function unresolvedAttemptMessage() {
+  return "Önceki isteğin sonucu henüz doğrulanmadı. Çifte işlem oluşmaması için alanları önceki değerlerine döndürüp aynı isteği tekrar gönderin.";
+}
 
 export default function InventoryScreen({ session }: { session: Session }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
+  const [inventorySummary, setInventorySummary] = useState<InventorySummary>(emptyInventorySummary);
+  const [productCursor, setProductCursor] = useState<ProductCursor | null>(null);
+  const [hasMoreProducts, setHasMoreProducts] = useState(false);
+  const [productPageLoading, setProductPageLoading] = useState(false);
   const [displayName, setDisplayName] = useState(session.user.email?.split("@")[0] ?? "Kullanıcı");
   const [username, setUsername] = useState(session.user.email?.split("@")[0] ?? "");
   const [role, setRole] = useState<ProfileRole | null>(null);
@@ -43,7 +261,9 @@ export default function InventoryScreen({ session }: { session: Session }) {
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [termsChecked, setTermsChecked] = useState(false);
   const [serverTermsVersion, setServerTermsVersion] = useState<string | null>(null);
+  const [serverTermsDigest, setServerTermsDigest] = useState<string | null>(null);
   const [acceptedTermsVersion, setAcceptedTermsVersion] = useState<string | null>(null);
+  const [acceptedTermsDigest, setAcceptedTermsDigest] = useState<string | null>(null);
   const [termsError, setTermsError] = useState("");
   const [acceptingTerms, setAcceptingTerms] = useState(false);
   const [reviewTermsModal, setReviewTermsModal] = useState(false);
@@ -52,6 +272,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [realtimeError, setRealtimeError] = useState("");
   const [productModal, setProductModal] = useState(false);
   const [movementModal, setMovementModal] = useState(false);
   const [coworkerModal, setCoworkerModal] = useState(false);
@@ -75,105 +296,279 @@ export default function InventoryScreen({ session }: { session: Session }) {
   const [coworkerPassword, setCoworkerPassword] = useState("");
   const [coworkerPasswordAgain, setCoworkerPasswordAgain] = useState("");
   const [saving, setSaving] = useState(false);
+  const loadRevisionRef = useRef(0);
+  const mountedRef = useRef(true);
+  const realtimeRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const productPageRevisionRef = useRef(0);
+  const productPageLoadingRef = useRef(false);
+  const productFilterRef = useRef({ query: "", onlyLow: false });
+  const savingRef = useRef(false);
+  const productAttemptRef = useRef<WriteAttempt | null>(null);
+  const movementAttemptRef = useRef<WriteAttempt | null>(null);
+  const coworkerAttemptRef = useRef<WriteAttempt | null>(null);
+  const reportAttemptRef = useRef<WriteAttempt | null>(null);
+  const reportSequenceRef = useRef(0);
+  const reportSavingRef = useRef(false);
+  const termsAcceptanceSequenceRef = useRef(0);
+  const termsAcceptanceInFlightRef = useRef(false);
+  const requiresTerms = !termsChecked
+    || serverTermsVersion !== CURRENT_UGC_TERMS_VERSION
+    || serverTermsDigest !== CURRENT_UGC_TERMS_DIGEST
+    || acceptedTermsVersion !== serverTermsVersion
+    || acceptedTermsDigest !== serverTermsDigest;
 
   const loadData = useCallback(async (quiet = false) => {
+    const revision = ++loadRevisionRef.current;
+    const isCurrent = () => mountedRef.current && revision === loadRevisionRef.current;
+    // A newer full load owns product paging immediately, even while its
+    // profile/terms checks are still pending. This prevents an older product
+    // request from leaving the shared loading latch permanently set.
+    productPageRevisionRef.current += 1;
+    productPageLoadingRef.current = false;
+    setProductPageLoading(false);
     if (!quiet) setLoading(true);
-    const profileResult = await retryTransientSupabaseOperation(() => supabase
-      .from("profiles")
-      .select("display_name,username,role,organization_id,is_platform_operator,must_change_password,ugc_terms_version,ugc_terms_accepted_at,organizations(name,subscription_status,trial_ends_at,current_period_end)")
-      .eq("id", session.user.id)
-      .maybeSingle());
+    try {
+      const profileResult = await retryTransientSupabaseOperation(() => supabase
+        .from("profiles")
+        .select("display_name,username,role,organization_id,is_platform_operator,must_change_password,ugc_terms_version,ugc_terms_accepted_at,organizations(name,subscription_status,trial_ends_at,current_period_end)")
+        .eq("id", session.user.id)
+        .maybeSingle());
 
-    if (profileResult.error || !profileResult.data?.organization_id) {
-      const profileError = profileResult.error?.message ?? "İşletme profili bulunamadı.";
-      setError(profileError);
-      setTermsError(profileError);
-      setTermsChecked(false);
-      setLoading(false); setRefreshing(false);
-      return;
-    }
+      if (!isCurrent()) return;
+      if (profileResult.error || !profileResult.data?.organization_id) {
+        const profileError = readableQueryError(profileResult.error, "İşletme profili bulunamadı.");
+        setError(profileError);
+        setTermsError(profileError);
+        setTermsChecked(false);
+        setProducts([]);
+        setProductCursor(null);
+        setHasMoreProducts(false);
+        setMovements([]);
+        setInventorySummary(emptyInventorySummary());
+        return;
+      }
 
-    if (profileResult.data.must_change_password) {
-      setMustChangePassword(true);
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-    setMustChangePassword(false);
+      if (profileResult.data.must_change_password) {
+        setMustChangePassword(true);
+        return;
+      }
+      setMustChangePassword(false);
 
-    const termsResult = await supabase.rpc("get_ugc_terms_status");
-    if (termsResult.error || !termsResult.data) {
-      const statusError = termsResult.error?.message ?? "Kullanım koşulları durumu alınamadı.";
-      setTermsError(statusError);
-      setTermsChecked(false);
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-    const termsStatus = termsResult.data as {
-      current_version?: string;
-      accepted_version?: string | null;
-      accepted_at?: string | null;
-      accepted?: boolean;
-    };
-    const nextServerTermsVersion = termsStatus.current_version ?? null;
-    setServerTermsVersion(nextServerTermsVersion);
-    setAcceptedTermsVersion(termsStatus.accepted_version ?? null);
-    setTermsChecked(true);
-    setTermsError(nextServerTermsVersion === CURRENT_UGC_TERMS_VERSION
-      ? ""
-      : "Kullanım koşulları güncellendi. Devam etmek için Stokdaş'ın güncel sürümünü yükleyin.");
-
-    const profileOrganization = Array.isArray(profileResult.data.organizations)
-      ? profileResult.data.organizations[0]
-      : profileResult.data.organizations;
-    const nextOrganizationId = profileResult.data.organization_id as string;
-    const [productResult, movementResult] = await Promise.all([
-      supabase.from("products")
-        .select("id,name,sku,category,unit,stock,min_stock,active,created_at,updated_at")
-        .eq("organization_id", nextOrganizationId)
-        .eq("active", true)
-        .order("name"),
-      supabase.from("stock_movements")
-        .select("id,product_id,type,quantity,previous_stock,new_stock,note,actor_id,actor_name,created_at,products(name,sku,unit)")
-        .eq("organization_id", nextOrganizationId)
-        .order("created_at", { ascending: false })
-        .limit(30),
-    ]);
-
-    const firstError = productResult.error ?? movementResult.error;
-    if (firstError) setError(firstError.message);
-    else {
-      setProducts((productResult.data ?? []).map((item) => ({ ...item, stock: Number(item.stock), min_stock: Number(item.min_stock) })) as Product[]);
-      setMovements((movementResult.data ?? []).map((item) => ({
-        ...item,
-        quantity: Number(item.quantity), previous_stock: Number(item.previous_stock), new_stock: Number(item.new_stock),
-        products: Array.isArray(item.products) ? (item.products[0] ?? null) : item.products,
-      })) as Movement[]);
-      if (profileResult.data?.display_name) setDisplayName(profileResult.data.display_name);
-      if (profileResult.data?.username) setUsername(profileResult.data.username);
-      if (profileResult.data?.role) setRole(profileResult.data.role as ProfileRole);
+      const profileOrganization = Array.isArray(profileResult.data.organizations)
+        ? profileResult.data.organizations[0]
+        : profileResult.data.organizations;
+      const nextOrganizationId = profileResult.data.organization_id as string;
+      if (profileResult.data.display_name) setDisplayName(profileResult.data.display_name);
+      if (profileResult.data.username) setUsername(profileResult.data.username);
+      if (profileResult.data.role) setRole(profileResult.data.role as ProfileRole);
       setOrganizationId(nextOrganizationId);
       setOrganizationName(profileOrganization?.name ?? "İşletme");
       setSubscriptionStatus(profileOrganization?.subscription_status ?? "active");
       setTrialEndsAt(profileOrganization?.trial_ends_at ?? null);
       setCurrentPeriodEnd(profileOrganization?.current_period_end ?? null);
-      setIsPlatformOperator(Boolean(profileResult.data?.is_platform_operator));
-      setError("");
+      setIsPlatformOperator(Boolean(profileResult.data.is_platform_operator));
+
+      const termsResult = await retryTransientSupabaseOperation(() => supabase.rpc("get_ugc_terms_status"));
+      if (!isCurrent()) return;
+      if (termsResult.error || !termsResult.data) {
+        const statusError = readableQueryError(termsResult.error, "Kullanım koşulları durumu alınamadı.");
+        setTermsError(statusError);
+        setTermsChecked(false);
+        setProducts([]);
+        setProductCursor(null);
+        setHasMoreProducts(false);
+        setMovements([]);
+        setInventorySummary(emptyInventorySummary());
+        return;
+      }
+      const termsStatus = termsResult.data as {
+        current_version?: string;
+        current_digest?: string;
+        accepted_version?: string | null;
+        accepted_digest?: string | null;
+        accepted?: boolean;
+      };
+      const nextServerTermsVersion = termsStatus.current_version ?? null;
+      const nextServerTermsDigest = termsStatus.current_digest ?? null;
+      setServerTermsVersion(nextServerTermsVersion);
+      setServerTermsDigest(nextServerTermsDigest);
+      setAcceptedTermsVersion(termsStatus.accepted_version ?? null);
+      setAcceptedTermsDigest(termsStatus.accepted_digest ?? null);
+      setTermsChecked(true);
+      const termsDocumentMatches = nextServerTermsVersion === CURRENT_UGC_TERMS_VERSION
+        && nextServerTermsDigest === CURRENT_UGC_TERMS_DIGEST;
+      const termsAcceptanceMatches = termsStatus.accepted === true
+        && termsStatus.accepted_version === CURRENT_UGC_TERMS_VERSION
+        && termsStatus.accepted_digest === CURRENT_UGC_TERMS_DIGEST;
+      setTermsError(termsDocumentMatches
+        ? ""
+        : "Kullanım koşulları güncellendi. Devam etmek için Stokdaş'ın güncel sürümünü yükleyin.");
+      if (!termsDocumentMatches || !termsAcceptanceMatches) {
+        productPageRevisionRef.current += 1;
+        productPageLoadingRef.current = false;
+        setProductPageLoading(false);
+        setProducts([]);
+        setProductCursor(null);
+        setHasMoreProducts(false);
+        setMovements([]);
+        setInventorySummary(emptyInventorySummary());
+        setError("");
+        return;
+      }
+
+      const productRevision = ++productPageRevisionRef.current;
+      productPageLoadingRef.current = true;
+      setProductPageLoading(true);
+      const activeFilter = productFilterRef.current;
+      const [productResult, movementResult, summaryResult] = await Promise.all([
+        loadProductPage(nextOrganizationId, null, activeFilter.query, activeFilter.onlyLow),
+        loadRecentMovements(nextOrganizationId),
+        loadInventorySummary(),
+      ]);
+      if (!isCurrent()) return;
+
+      const queryErrors: string[] = [];
+      if (productRevision === productPageRevisionRef.current) {
+        productPageLoadingRef.current = false;
+        setProductPageLoading(false);
+        if (productResult.error) queryErrors.push(readableQueryError(productResult.error, "Ürünler alınamadı."));
+        else {
+          setProducts(productResult.data);
+          setProductCursor(productResult.nextCursor);
+          setHasMoreProducts(productResult.hasMore);
+        }
+      }
+      if (movementResult.error) queryErrors.push(readableQueryError(movementResult.error, "Stok hareketleri alınamadı."));
+      else setMovements(movementResult.data);
+      if (summaryResult.error) queryErrors.push(readableQueryError(summaryResult.error, "Stok özeti alınamadı."));
+      else setInventorySummary(summaryResult.data);
+      setError(queryErrors.join(" "));
+    } catch (loadError) {
+      if (isCurrent()) setError(readableQueryError(loadError, "Stok verileri alınamadı."));
+    } finally {
+      if (isCurrent()) {
+        if (!productPageLoadingRef.current) setProductPageLoading(false);
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-    setLoading(false); setRefreshing(false);
   }, [session.user.id]);
 
-  useEffect(() => { void loadData(); }, [loadData]);
-  useEffect(() => {
+  const reloadProductPage = useCallback(async (query: string, onlyLowFilter: boolean) => {
     if (!organizationId) return;
+    const revision = ++productPageRevisionRef.current;
+    productPageLoadingRef.current = true;
+    setProductPageLoading(true);
+    const result = await loadProductPage(organizationId, null, query, onlyLowFilter);
+    if (!mountedRef.current || revision !== productPageRevisionRef.current) return;
+    productPageLoadingRef.current = false;
+    setProductPageLoading(false);
+    if (result.error) {
+      setError(readableQueryError(result.error, "Ürünler alınamadı."));
+      return;
+    }
+    setProducts(result.data);
+    setProductCursor(result.nextCursor);
+    setHasMoreProducts(result.hasMore);
+    setError("");
+  }, [organizationId]);
+
+  const loadMoreProducts = useCallback(async () => {
+    if (!organizationId || !hasMoreProducts || !productCursor || productPageLoadingRef.current) return;
+    const revision = productPageRevisionRef.current;
+    productPageLoadingRef.current = true;
+    setProductPageLoading(true);
+    const activeFilter = productFilterRef.current;
+    const result = await loadProductPage(
+      organizationId,
+      productCursor,
+      activeFilter.query,
+      activeFilter.onlyLow,
+    );
+    if (!mountedRef.current || revision !== productPageRevisionRef.current) return;
+    productPageLoadingRef.current = false;
+    setProductPageLoading(false);
+    if (result.error) {
+      setHasMoreProducts(false);
+      setError(readableQueryError(result.error, "Daha fazla ürün alınamadı."));
+      return;
+    }
+    setProducts((current) => {
+      const byId = new Map(current.map((product) => [product.id, product]));
+      for (const product of result.data) byId.set(product.id, product);
+      return [...byId.values()].sort(compareProducts);
+    });
+    setProductCursor(result.nextCursor);
+    setHasMoreProducts(result.hasMore);
+  }, [hasMoreProducts, organizationId, productCursor]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void loadData();
+    return () => {
+      mountedRef.current = false;
+      loadRevisionRef.current += 1;
+      productPageRevisionRef.current += 1;
+      reportSequenceRef.current += 1;
+      termsAcceptanceSequenceRef.current += 1;
+      productPageLoadingRef.current = false;
+      reportSavingRef.current = false;
+      termsAcceptanceInFlightRef.current = false;
+      if (realtimeRefreshRef.current) clearTimeout(realtimeRefreshRef.current);
+    };
+  }, [loadData]);
+  useEffect(() => {
+    if (!organizationId || requiresTerms) return;
+    const timeout = setTimeout(() => {
+      const filter = { query: search.trim(), onlyLow };
+      productFilterRef.current = filter;
+      void reloadProductPage(filter.query, filter.onlyLow);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [onlyLow, organizationId, reloadProductPage, requiresTerms, search]);
+  useEffect(() => {
+    if (!organizationId || requiresTerms) return;
     const filter = `organization_id=eq.${organizationId}`;
+    const scheduleRefresh = () => {
+      if (realtimeRefreshRef.current) clearTimeout(realtimeRefreshRef.current);
+      realtimeRefreshRef.current = setTimeout(() => {
+        realtimeRefreshRef.current = null;
+        void loadData(true);
+      }, 250);
+    };
     const channel = supabase.channel(`stokta-live-${organizationId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "products", filter }, () => void loadData(true))
-      .on("postgres_changes", { event: "*", schema: "public", table: "stock_movements", filter }, () => void loadData(true))
-      .subscribe();
-    return () => { void supabase.removeChannel(channel); };
-  }, [loadData, organizationId]);
+      .on("postgres_changes", { event: "*", schema: "public", table: "products", filter }, scheduleRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "stock_movements", filter }, scheduleRefresh)
+      .subscribe((status) => {
+        if (!mountedRef.current) return;
+        if (status === "SUBSCRIBED") setRealtimeError("");
+        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          setRealtimeError("Canlı güncellemeler kesildi. Listeyi yenileyerek güncel veriyi alabilirsiniz.");
+        }
+      });
+    return () => {
+      if (realtimeRefreshRef.current) clearTimeout(realtimeRefreshRef.current);
+      realtimeRefreshRef.current = null;
+      void supabase.removeChannel(channel);
+    };
+  }, [loadData, organizationId, requiresTerms]);
+  useEffect(() => {
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void loadData(true);
+    });
+    return () => appStateSubscription.remove();
+  }, [loadData]);
+  useEffect(() => {
+    const selectedId = selectedProduct?.id;
+    if (!selectedId) return;
+    const latest = products.find((product) => product.id === selectedId);
+    if (!latest) {
+      setSelectedProduct(null);
+      setMovementModal(false);
+      return;
+    }
+    if (latest !== selectedProduct) setSelectedProduct(latest);
+  }, [products, selectedProduct]);
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("tr-TR");
@@ -183,15 +578,9 @@ export default function InventoryScreen({ session }: { session: Session }) {
     });
   }, [products, search, onlyLow]);
 
-  const lowCount = products.filter((product) => product.stock <= product.min_stock).length;
-  const criticalCount = products.filter((product) => product.stock === 0).length;
-  const todayKey = new Date().toDateString();
-  const todayMovementCount = movements.filter((movement) => new Date(movement.created_at).toDateString() === todayKey).length;
+  const hasProductFilter = Boolean(search.trim()) || onlyLow;
   const firstName = displayName.split(" ")[0] || displayName;
   const isAdmin = role === "admin";
-  const requiresTerms = !termsChecked
-    || serverTermsVersion !== CURRENT_UGC_TERMS_VERSION
-    || acceptedTermsVersion !== serverTermsVersion;
   const now = Date.now();
   const canWrite = (subscriptionStatus === "trial" && Boolean(trialEndsAt) && new Date(trialEndsAt ?? 0).getTime() > now)
     || (subscriptionStatus === "active" && (!currentPeriodEnd || new Date(currentPeriodEnd).getTime() > now));
@@ -208,25 +597,44 @@ export default function InventoryScreen({ session }: { session: Session }) {
   }
 
   async function acceptTerms() {
+    if (termsAcceptanceInFlightRef.current) return;
+    termsAcceptanceInFlightRef.current = true;
+    const sequence = ++termsAcceptanceSequenceRef.current;
     setAcceptingTerms(true);
     setTermsError("");
-    const { data, error: acceptError } = await supabase.rpc("accept_current_ugc_terms", {
+    const { data, error: acceptError } = await retryTransientSupabaseOperation(() => supabase.rpc("accept_current_ugc_terms", {
       p_version: CURRENT_UGC_TERMS_VERSION,
-    });
+      p_digest: CURRENT_UGC_TERMS_DIGEST,
+    }));
+    if (!mountedRef.current || sequence !== termsAcceptanceSequenceRef.current) return;
+    termsAcceptanceInFlightRef.current = false;
     setAcceptingTerms(false);
     if (acceptError) {
       setTermsError(acceptError.message);
       return;
     }
-    const response = data as { accepted?: boolean; accepted_version?: string; current_version?: string } | null;
-    if (!response?.accepted || response.accepted_version !== CURRENT_UGC_TERMS_VERSION || response.current_version !== CURRENT_UGC_TERMS_VERSION) {
+    const response = data as {
+      accepted?: boolean;
+      accepted_version?: string;
+      accepted_digest?: string;
+      current_version?: string;
+      current_digest?: string;
+    } | null;
+    if (!response?.accepted
+      || response.accepted_version !== CURRENT_UGC_TERMS_VERSION
+      || response.current_version !== CURRENT_UGC_TERMS_VERSION
+      || response.accepted_digest !== CURRENT_UGC_TERMS_DIGEST
+      || response.current_digest !== CURRENT_UGC_TERMS_DIGEST) {
       setTermsError("Koşul kabulü doğrulanamadı. Lütfen yeniden deneyin.");
       return;
     }
     setAcceptedTermsVersion(response.accepted_version);
+    setAcceptedTermsDigest(response.accepted_digest);
     setServerTermsVersion(response.current_version);
+    setServerTermsDigest(response.current_digest);
     setTermsChecked(true);
     setReviewTermsModal(false);
+    await loadData(true);
   }
 
   function reviewTerms() {
@@ -272,22 +680,42 @@ export default function InventoryScreen({ session }: { session: Session }) {
   }
 
   async function submitReport(reason: ContentReportReason, details: string) {
-    if (!reportTarget) return;
+    if (!reportTarget || reportSavingRef.current) return;
+    const target = reportTarget;
+    const normalizedDetails = details.trim();
+    const signature = JSON.stringify({ targetType: target.type, targetId: target.id, reason, details: normalizedDetails });
+    const requestId = requestIdForAttempt(reportAttemptRef, signature);
+    if (!requestId) {
+      setReportError(unresolvedAttemptMessage());
+      return;
+    }
+    const sequence = ++reportSequenceRef.current;
+    reportSavingRef.current = true;
     setReportSaving(true);
     setReportError("");
-    const { error: submitError } = await supabase.rpc("report_content", {
-      p_target_type: reportTarget.type,
-      p_target_id: reportTarget.id,
+    const { data, error: submitError } = await retryTransientSupabaseOperation(() => supabase.rpc("report_content", {
+      p_target_type: target.type,
+      p_target_id: target.id,
       p_reason: reason,
-      p_details: details,
-    });
+      p_details: normalizedDetails,
+      p_request_id: requestId,
+    }));
+    if (!mountedRef.current || sequence !== reportSequenceRef.current) return;
+    reportSavingRef.current = false;
     setReportSaving(false);
     if (submitError) {
+      if (!isAmbiguousWriteError(submitError)) reportAttemptRef.current = null;
       setReportError(submitError.message);
       return;
     }
+    const result = data as { report_id?: string; status?: string; request_id?: string } | null;
+    if (typeof result?.report_id !== "string" || result.status !== "open" || result.request_id !== requestId) {
+      setReportError("Bildirim için sunucu onayı doğrulanamadı. Aynı bilgilerle yeniden deneyin.");
+      return;
+    }
+    reportAttemptRef.current = null;
     setReportTarget(null);
-    Alert.alert("Bildirim alındı", "Yetkili inceleme ekibi bildirimi Güvenlik Merkezi’nden değerlendirecek.");
+    Alert.alert("Bildirim alındı", "Bildirim, hedefin rolüne göre yetkili inceleme kuyruğuna iletildi.");
   }
 
   function openCreate() { if (!isAdmin || !requireWritable()) return; setEditing(null); setDraft(emptyDraft); setProductModal(true); }
@@ -302,37 +730,146 @@ export default function InventoryScreen({ session }: { session: Session }) {
     setSelectedProduct(product); setMovementType(type); setQuantity(""); setNote(""); setMovementModal(true);
   }
 
+  function closeProductEditor() {
+    if (savingRef.current || productAttemptRef.current) {
+      Alert.alert("İşlem sonucu bekleniyor", unresolvedAttemptMessage());
+      return;
+    }
+    setProductModal(false);
+  }
+
+  function closeMovementEditor() {
+    if (savingRef.current || movementAttemptRef.current) {
+      Alert.alert("İşlem sonucu bekleniyor", unresolvedAttemptMessage());
+      return;
+    }
+    setMovementModal(false);
+  }
+
+  function closeCoworkerEditor() {
+    if (savingRef.current || coworkerAttemptRef.current) {
+      Alert.alert("İşlem sonucu bekleniyor", unresolvedAttemptMessage());
+      return;
+    }
+    setCoworkerModal(false);
+  }
+
+  function closeContentReport() {
+    if (reportSavingRef.current || reportAttemptRef.current) {
+      setReportError(unresolvedAttemptMessage());
+      return;
+    }
+    setReportTarget(null);
+  }
+
   async function saveProduct() {
-    if (!isAdmin) return;
+    if (!isAdmin || savingRef.current) return;
     if (!draft.name.trim() || !draft.sku.trim()) { Alert.alert("Eksik bilgi", "Ürün adı ve ürün kodu zorunludur."); return; }
     const stock = Number(draft.stock.replace(",", "."));
     const minStock = Number(draft.minStock.replace(",", "."));
     if (!Number.isFinite(stock) || stock < 0 || !Number.isFinite(minStock) || minStock < 0) { Alert.alert("Hatalı miktar", "Stok değerleri negatif olamaz."); return; }
+    const signature = JSON.stringify({
+      operation: editing ? "update" : "create",
+      productId: editing?.id ?? null,
+      expectedUpdatedAt: editing?.updated_at ?? null,
+      name: draft.name.trim(),
+      sku: draft.sku.trim(),
+      category: draft.category.trim(),
+      unit: draft.unit.trim(),
+      stock,
+      minStock,
+    });
+    const requestId = requestIdForAttempt(productAttemptRef, signature);
+    if (!requestId) { Alert.alert("Önceki işlem bekliyor", unresolvedAttemptMessage()); return; }
+    savingRef.current = true;
     setSaving(true);
     const args = editing ? {
-      p_product_id: editing.id, p_name: draft.name, p_sku: draft.sku,
-      p_category: draft.category, p_unit: draft.unit, p_min_stock: minStock,
+      p_product_id: editing.id, p_name: draft.name.trim(), p_sku: draft.sku.trim(),
+      p_category: draft.category.trim(), p_unit: draft.unit.trim(), p_min_stock: minStock,
+      p_expected_updated_at: editing.updated_at, p_request_id: requestId,
     } : {
-      p_name: draft.name, p_sku: draft.sku, p_category: draft.category,
-      p_unit: draft.unit, p_stock: stock, p_min_stock: minStock,
+      p_name: draft.name.trim(), p_sku: draft.sku.trim(), p_category: draft.category.trim(),
+      p_unit: draft.unit.trim(), p_stock: stock, p_min_stock: minStock, p_request_id: requestId,
     };
-    const { error: saveError } = await supabase.rpc(editing ? "update_inventory_product" : "create_inventory_product", args);
+    const { data: saveData, error: saveError } = await retryTransientSupabaseOperation(() => supabase.rpc(
+      editing ? "update_inventory_product" : "create_inventory_product",
+      args,
+    ));
+    savingRef.current = false;
     setSaving(false);
-    if (saveError) { Alert.alert("Kaydedilemedi", friendlyError(saveError.message)); return; }
+    if (saveError) {
+      if (!isAmbiguousWriteError(saveError)) productAttemptRef.current = null;
+      Alert.alert("Kaydedilemedi", friendlyError(saveError.message));
+      return;
+    }
+    const savedProduct = normalizeProduct(Array.isArray(saveData) ? saveData[0] : saveData);
+    const expectedCategory = draft.category.trim() || "Genel";
+    const expectedUnit = (draft.unit.trim() || "adet").toLowerCase();
+    if (!savedProduct
+      || (editing && savedProduct.id !== editing.id)
+      || savedProduct.name !== draft.name.trim()
+      || savedProduct.sku !== draft.sku.trim().toUpperCase()
+      || savedProduct.category !== expectedCategory
+      || savedProduct.unit !== expectedUnit
+      || Math.abs(savedProduct.min_stock - Math.round(minStock * 1_000) / 1_000) > 0.000_001
+      || (!editing && Math.abs(savedProduct.stock - Math.round(stock * 1_000) / 1_000) > 0.000_001)) {
+      Alert.alert("Kayıt sonucu doğrulanamadı", "Sunucudan beklenen ürün kaydı alınamadı. Aynı bilgilerle yeniden deneyin.");
+      return;
+    }
+    productAttemptRef.current = null;
     setProductModal(false); await loadData(true);
   }
 
   async function saveMovement() {
-    if (!selectedProduct) return;
+    if (!selectedProduct || savingRef.current) return;
     const amount = Number(quantity.replace(",", "."));
     if (!Number.isFinite(amount) || amount <= 0) { Alert.alert("Hatalı miktar", "Sıfırdan büyük bir miktar girin."); return; }
     if (movementType === "out" && amount > selectedProduct.stock) { Alert.alert("Yetersiz stok", `Stokta yalnızca ${formatQty(selectedProduct.stock)} ${selectedProduct.unit} bulunuyor.`); return; }
+    const signature = JSON.stringify({ productId: selectedProduct.id, type: movementType, amount, note: note.trim() });
+    const requestId = requestIdForAttempt(movementAttemptRef, signature);
+    if (!requestId) { Alert.alert("Önceki işlem bekliyor", unresolvedAttemptMessage()); return; }
+    savingRef.current = true;
     setSaving(true);
-    const { error: movementError } = await supabase.rpc("record_stock_movement", {
-      p_product_id: selectedProduct.id, p_type: movementType, p_quantity: amount, p_note: note,
-    });
+    const { data: movementData, error: movementError } = await retryTransientSupabaseOperation(() => supabase.rpc(
+      "record_stock_movement",
+      { p_product_id: selectedProduct.id, p_type: movementType, p_quantity: amount, p_note: note.trim(), p_request_id: requestId },
+    ));
+    savingRef.current = false;
     setSaving(false);
-    if (movementError) { Alert.alert("İşlem yapılamadı", friendlyError(movementError.message)); await loadData(true); return; }
+    if (movementError) {
+      if (!isAmbiguousWriteError(movementError)) movementAttemptRef.current = null;
+      Alert.alert("İşlem yapılamadı", friendlyError(movementError.message));
+      await loadData(true);
+      return;
+    }
+    const movementResult = movementData as {
+      movement_id?: unknown;
+      event_sequence?: unknown;
+      product_id?: unknown;
+      previous_stock?: unknown;
+      new_stock?: unknown;
+      product_updated_at?: unknown;
+    } | null;
+    const confirmedStock = Number(movementResult?.new_stock);
+    if (typeof movementResult?.movement_id !== "string"
+      || !Number.isSafeInteger(Number(movementResult.event_sequence))
+      || Number(movementResult.event_sequence) < 1
+      || movementResult.product_id !== selectedProduct.id
+      || !Number.isFinite(Number(movementResult.previous_stock))
+      || !Number.isFinite(confirmedStock)
+      || confirmedStock < 0
+      || typeof movementResult.product_updated_at !== "string"
+      || !Number.isFinite(Date.parse(movementResult.product_updated_at))) {
+      Alert.alert("İşlem sonucu doğrulanamadı", "Sunucudan beklenen stok hareketi onayı alınamadı. Aynı işlemle yeniden deneyin.");
+      await loadData(true);
+      return;
+    }
+    movementAttemptRef.current = null;
+    setProducts((current) => current.map((product) => (
+      product.id === selectedProduct.id
+        ? { ...product, stock: confirmedStock, updated_at: movementResult.product_updated_at as string }
+        : product
+    )));
     setMovementModal(false); await loadData(true);
   }
 
@@ -347,7 +884,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
   }
 
   async function saveCoworker() {
-    if (!isAdmin) return;
+    if (!isAdmin || savingRef.current) return;
     const normalizedUsername = normalizeUsername(coworkerUsername);
     const normalizedEmail = coworkerEmail.trim().toLowerCase();
     if (!coworkerName.trim()) { Alert.alert("Eksik bilgi", "Çalışanın adını girin."); return; }
@@ -356,15 +893,34 @@ export default function InventoryScreen({ session }: { session: Session }) {
     if (!isStrongPassword(coworkerPassword)) { Alert.alert("Hatalı şifre", "Şifre 8-72 karakter olmalı; büyük harf, küçük harf, rakam ve sembol içermeli."); return; }
     if (coworkerPassword !== coworkerPasswordAgain) { Alert.alert("Şifreler eşleşmiyor", "İki alana aynı şifreyi girin."); return; }
 
+    const signature = JSON.stringify({ username: normalizedUsername, recoveryEmail: normalizedEmail, displayName: coworkerName.trim(), password: coworkerPassword });
+    const requestId = requestIdForAttempt(coworkerAttemptRef, signature);
+    if (!requestId) { Alert.alert("Önceki işlem bekliyor", unresolvedAttemptMessage()); return; }
+    savingRef.current = true;
     setSaving(true);
-    const { error: createError } = await supabase.functions.invoke("create-coworker", {
-      body: { username: normalizedUsername, displayName: coworkerName.trim(), recoveryEmail: normalizedEmail, password: coworkerPassword },
-    });
+    const { data: createData, error: createError } = await retryTransientSupabaseOperation(() => supabase.functions.invoke("create-coworker", {
+      body: { username: normalizedUsername, displayName: coworkerName.trim(), recoveryEmail: normalizedEmail, password: coworkerPassword, requestId },
+    }));
+    savingRef.current = false;
     setSaving(false);
     if (createError) {
+      if (!isAmbiguousWriteError(createError)) coworkerAttemptRef.current = null;
       Alert.alert("Çalışan oluşturulamadı", await edgeFunctionError(createError));
       return;
     }
+    const coworkerResult = createData as {
+      accepted?: unknown;
+      verificationRequired?: unknown;
+      requestId?: unknown;
+    } | null;
+    if (coworkerResult?.accepted !== true
+      || coworkerResult.verificationRequired !== true
+      || !isDeletionRequestId(coworkerResult.requestId)) {
+      Alert.alert("Çalışan oluşturulamadı", "Sunucunun davet onayı doğrulanamadı. Aynı bilgilerle yeniden deneyin.");
+      return;
+    }
+    coworkerAttemptRef.current = { signature, requestId: coworkerResult.requestId };
+    coworkerAttemptRef.current = null;
     setCoworkerModal(false);
     Alert.alert("Doğrulama gönderildi", `${coworkerName.trim()} için doğrulama kodu ${normalizedEmail} adresine gönderildi. Çalışan “${normalizedUsername}” kullanıcı adıyla giriş yapıp kodu tamamlayabilir.`);
   }
@@ -377,19 +933,76 @@ export default function InventoryScreen({ session }: { session: Session }) {
   }
 
   async function deleteAccount(confirmation: string, currentPassword: string) {
-    setSaving(true);
-    const { error: deleteError } = await supabase.functions.invoke("delete-account", {
-      body: { confirmation, currentPassword },
-    });
-    setSaving(false);
-    if (deleteError) {
-      Alert.alert("Hesap silinemedi", await edgeFunctionError(deleteError));
+    if (savingRef.current) return;
+    if (!organizationId) {
+      Alert.alert("Hesap silinemedi", "İşletme kimliği doğrulanamadı. Ekranı yenileyip tekrar deneyin.");
       return;
     }
+    savingRef.current = true;
+    setSaving(true);
+    let requestLaunched = false;
+    try {
+      const savedIntent = await readAccountDeletionIntent(session.user.id, organizationId);
+      let deletionRequestId = savedIntent?.deletionRequestId ?? randomUUID();
+      await saveAccountDeletionIntent(session.user.id, organizationId, deletionRequestId);
 
-    setAccountModal(false);
-    await supabase.auth.signOut({ scope: "local" });
-    Alert.alert("Silme tamamlandı", isAdmin ? "Çalışma alanı ve tüm hesaplar kalıcı olarak silindi." : "Hesabınız ve kişisel profil bilgileriniz silindi.");
+      requestLaunched = true;
+      const { data: deleteData, error: deleteError } = await retryTransientSupabaseOperation(
+        () => supabase.functions.invoke("delete-account", {
+          body: { confirmation, currentPassword, deletionRequestId },
+        }),
+        750,
+        45_000,
+      );
+      if (deleteError) {
+        const details = await deletionFunctionErrorDetails(deleteError);
+        if (details.deletionRequestId) {
+          deletionRequestId = details.deletionRequestId;
+          await saveAccountDeletionIntent(session.user.id, organizationId, deletionRequestId);
+        }
+        if (details.code && CLEARABLE_DELETION_CODES.has(details.code)) {
+          await clearAccountDeletionIntent(session.user.id, organizationId);
+        }
+        Alert.alert("Hesap silinemedi", details.message);
+        return;
+      }
+      const deletionResult = deleteData as { deleted?: boolean; scope?: unknown; deletionRequestId?: unknown } | null;
+      const canonicalRequestId = deletionResult?.deletionRequestId;
+      if (deletionResult?.deleted !== true
+        || (deletionResult.scope !== "account" && deletionResult.scope !== "organization")
+        || !isDeletionRequestId(canonicalRequestId)) {
+        Alert.alert("Silme sonucu doğrulanamadı", "Sunucunun silme onayı doğrulanamadı. Aynı ekrandan yeniden deneyin.");
+        return;
+      }
+
+      // The server can resume a pre-existing saga and return its canonical ID.
+      // Persist it before treating the terminal response as complete so a
+      // process interruption can still replay the exact server operation.
+      await saveAccountDeletionIntent(session.user.id, organizationId, canonicalRequestId);
+      await clearAccountDeletionIntent(session.user.id, organizationId).catch(() => undefined);
+      setAccountModal(false);
+      await retryTransientSupabaseOperation(
+        () => supabase.auth.signOut({ scope: "local" }),
+        250,
+        8_000,
+      );
+      Alert.alert(
+        "Silme tamamlandı",
+        isAdmin
+          ? "İşletmenin aktif çalışma alanı ve hesap erişimleri kaldırıldı. Sınırlı teknik kayıtların saklama süreleri Gizlilik Politikası'nda açıklanır."
+          : "Hesap erişiminiz ve kişisel profiliniz kaldırıldı. Sınırlı teknik kayıtların saklama süreleri Gizlilik Politikası'nda açıklanır.",
+      );
+    } catch {
+      Alert.alert(
+        requestLaunched ? "Silme sonucu doğrulanamadı" : "Silme başlatılamadı",
+        requestLaunched
+          ? "Sunucu sonucu doğrulanamadı. Güvenli silme kimliği bu cihazda korunuyor; aynı ekrandan tekrar deneyin."
+          : "Güvenli silme isteği bu cihazda saklanamadığı için işlem başlatılmadı. Depolama erişimini kontrol edip tekrar deneyin.",
+      );
+    } finally {
+      savingRef.current = false;
+      if (mountedRef.current) setSaving(false);
+    }
   }
 
   if (mustChangePassword) return <ForcedPasswordChange />;
@@ -398,6 +1011,8 @@ export default function InventoryScreen({ session }: { session: Session }) {
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <FlatList
         data={filteredProducts}
+        onEndReached={() => void loadMoreProducts()}
+        onEndReachedThreshold={0.35}
         scrollEnabled={!requiresTerms}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor="#1f7353" colors={["#1f7353"]} onRefresh={() => { setRefreshing(true); void loadData(true); }} />}
@@ -411,7 +1026,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
               <Pressable style={styles.avatar} onPress={() => setAccountModal(true)}><Text style={styles.avatarText}>{initials(displayName)}</Text></Pressable>
             </View>
           </View>
-          {error ? <Pressable style={styles.errorBanner} onPress={() => void loadData()}><Text style={styles.errorText}>{error}</Text><Text style={styles.retry}>Tekrar dene</Text></Pressable> : null}
+          {error || realtimeError ? <Pressable style={styles.errorBanner} onPress={() => { setRealtimeError(""); void loadData(); }}><Text style={styles.errorText}>{[error, realtimeError].filter(Boolean).join(" ")}</Text><Text style={styles.retry}>Tekrar dene</Text></Pressable> : null}
           {!canWrite ? <View style={styles.subscriptionBanner}>
             <Text style={styles.subscriptionBannerTitle}>Abonelik durumu: {subscriptionLabel}</Text>
             <Text style={styles.subscriptionBannerText}>Veriler görüntülenebilir; stok ve kullanıcı değişiklikleri geçici olarak kapalıdır.</Text>
@@ -425,22 +1040,25 @@ export default function InventoryScreen({ session }: { session: Session }) {
             </Pressable> : null}
           </View> : null}
           <View style={styles.statsGrid}>
-            <StatCard label="TOPLAM ÜRÜN" value={products.length} caption="Aktif ürün çeşidi" tone="green" />
-            <StatCard label="AZALAN STOK" value={lowCount} caption={criticalCount ? `${criticalCount} ürün tükendi` : "Kontrol bekliyor"} tone="amber" />
-            <StatCard label="BUGÜNKÜ İŞLEM" value={todayMovementCount} caption="Buluta kaydedildi" tone="blue" />
+            <StatCard label="TOPLAM ÜRÜN" value={inventorySummary.totalProducts} caption="Aktif ürün çeşidi" tone="green" />
+            <StatCard label="AZALAN STOK" value={inventorySummary.lowStockProducts} caption={inventorySummary.criticalProducts ? `${inventorySummary.criticalProducts} ürün tükendi` : "Kontrol bekliyor"} tone="amber" />
+            <StatCard label="BUGÜNKÜ İŞLEM" value={inventorySummary.todayMovements} caption="Buluta kaydedildi" tone="blue" />
           </View>
           <View style={styles.sectionHead}><View><Text style={styles.eyebrow}>ANLIK LİSTE</Text><Text style={styles.sectionTitle}>Stok kontrolü</Text></View><Pressable style={[styles.lowFilter, onlyLow && styles.lowFilterActive]} onPress={() => setOnlyLow((value) => !value)}><Text style={[styles.lowFilterText, onlyLow && styles.lowFilterTextActive]}>{onlyLow ? "Tümü" : "Azalanlar"}</Text></Pressable></View>
           <View style={styles.searchBox}><Text style={styles.searchIcon}>⌕</Text><TextInput style={styles.searchInput} value={search} onChangeText={setSearch} placeholder="Ürün, kod veya kategori ara" placeholderTextColor="#959d98" /></View>
-          {loading ? <View style={styles.loadingBox}><ActivityIndicator color="#1f7353" /><Text style={styles.loadingText}>Stoklar yükleniyor…</Text></View> : null}
+          {loading || (productPageLoading && !products.length) ? <View style={styles.loadingBox}><ActivityIndicator color="#1f7353" /><Text style={styles.loadingText}>Stoklar yükleniyor…</Text></View> : null}
         </>}
         renderItem={({ item }) => <ProductCard product={item} canEdit={isAdmin} onEdit={() => openEdit(item)} onIn={() => openMovement(item, "in")} onOut={() => openMovement(item, "out")} onReport={() => openProductReport(item)} />}
-        ListEmptyComponent={!loading ? <View style={styles.empty}><Text style={styles.emptyIcon}>□</Text><Text style={styles.emptyTitle}>{products.length ? "Aramana uygun ürün yok" : isAdmin ? "İlk ürününü ekle" : "Henüz ürün eklenmedi"}</Text><Text style={styles.emptyBody}>{products.length ? "Aramayı veya filtreyi değiştir." : isAdmin ? "Ürün kodunu, birimini ve uyarı sınırını tanımlayarak başlayabilirsin." : "Yönetici ilk ürünü eklediğinde burada görünecek."}</Text>{!products.length && isAdmin ? <Pressable style={styles.primaryButton} onPress={openCreate}><Text style={styles.primaryButtonText}>＋ İlk ürünü ekle</Text></Pressable> : null}</View> : null}
-        ListFooterComponent={<MovementHistory movements={movements.slice(0, 8)} onReportContent={openMovementReport} onReportActor={openActorReport} />}
+        ListEmptyComponent={!loading && !productPageLoading ? <View style={styles.empty}><Text style={styles.emptyIcon}>□</Text><Text style={styles.emptyTitle}>{hasProductFilter ? "Aramana uygun ürün yok" : isAdmin ? "İlk ürününü ekle" : "Henüz ürün eklenmedi"}</Text><Text style={styles.emptyBody}>{hasProductFilter ? "Aramayı veya filtreyi değiştir." : isAdmin ? "Ürün kodunu, birimini ve uyarı sınırını tanımlayarak başlayabilirsin." : "Yönetici ilk ürünü eklediğinde burada görünecek."}</Text>{!hasProductFilter && isAdmin ? <Pressable style={styles.primaryButton} onPress={openCreate}><Text style={styles.primaryButtonText}>＋ İlk ürünü ekle</Text></Pressable> : null}</View> : null}
+        ListFooterComponent={<>
+          {productPageLoading && products.length ? <View style={styles.pageLoading}><ActivityIndicator color="#1f7353" /><Text style={styles.loadingText}>Daha fazla ürün yükleniyor…</Text></View> : null}
+          <MovementHistory movements={movements.slice(0, 8)} onReportContent={openMovementReport} onReportActor={openActorReport} />
+        </>}
       />
       {isAdmin && canWrite ? <Pressable style={styles.fab} onPress={openCreate}><Text style={styles.fabText}>＋</Text></Pressable> : null}
-      {isAdmin ? <ProductEditor visible={productModal} editing={editing} draft={draft} setDraft={setDraft} saving={saving} onClose={() => setProductModal(false)} onSave={saveProduct} /> : null}
-      <MovementEditor visible={movementModal} product={selectedProduct} type={movementType} setType={setMovementType} quantity={quantity} setQuantity={setQuantity} note={note} setNote={setNote} saving={saving} onClose={() => setMovementModal(false)} onSave={saveMovement} />
-      {isAdmin ? <CoworkerEditor visible={coworkerModal} name={coworkerName} setName={setCoworkerName} username={coworkerUsername} setUsername={setCoworkerUsername} email={coworkerEmail} setEmail={setCoworkerEmail} password={coworkerPassword} setPassword={setCoworkerPassword} passwordAgain={coworkerPasswordAgain} setPasswordAgain={setCoworkerPasswordAgain} saving={saving} onClose={() => setCoworkerModal(false)} onSave={saveCoworker} /> : null}
+      {isAdmin ? <ProductEditor visible={productModal} editing={editing} draft={draft} setDraft={setDraft} saving={saving} onClose={closeProductEditor} onSave={saveProduct} /> : null}
+      <MovementEditor visible={movementModal} product={selectedProduct} type={movementType} setType={setMovementType} quantity={quantity} setQuantity={setQuantity} note={note} setNote={setNote} saving={saving} onClose={closeMovementEditor} onSave={saveMovement} />
+      {isAdmin ? <CoworkerEditor visible={coworkerModal} name={coworkerName} setName={setCoworkerName} username={coworkerUsername} setUsername={setCoworkerUsername} email={coworkerEmail} setEmail={setCoworkerEmail} password={coworkerPassword} setPassword={setCoworkerPassword} passwordAgain={coworkerPasswordAgain} setPasswordAgain={setCoworkerPasswordAgain} saving={saving} onClose={closeCoworkerEditor} onSave={saveCoworker} /> : null}
       <AccountModal visible={accountModal} displayName={displayName} username={username} role={role} organizationName={organizationName} subscriptionLabel={subscriptionLabel} isPlatformOperator={isPlatformOperator} saving={saving} onClose={() => setAccountModal(false)} onOpenSubscription={openSubscription} onOpenTerms={reviewTerms} onOpenSafetyCenter={() => openSafetyCenter("organization")} onOpenPlatformSafetyCenter={() => openSafetyCenter("platform")} onSignOut={signOut} onDelete={deleteAccount} />
       {isAdmin && !isPlatformOperator ? <SubscriptionModal
         visible={subscriptionModal}
@@ -454,13 +1072,15 @@ export default function InventoryScreen({ session }: { session: Session }) {
       /> : null}
       {isPlatformOperator ? <PlatformModal visible={platformModal} onClose={() => setPlatformModal(false)} /> : null}
       {isAdmin || isPlatformOperator ? <SafetyCenterModal scope={safetyCenterScope} visible={safetyCenterModal} onClose={() => setSafetyCenterModal(false)} onModerated={() => void loadData(true)} /> : null}
-      <ContentReportModal target={reportTarget} saving={reportSaving} error={reportError} onClose={() => { if (!reportSaving) setReportTarget(null); }} onSubmit={submitReport} />
+      <ContentReportModal target={reportTarget} saving={reportSaving} error={reportError} onClose={closeContentReport} onSubmit={submitReport} />
       <TermsModal
         visible={requiresTerms || reviewTermsModal}
         mandatory={requiresTerms}
         accepted={termsChecked
           && serverTermsVersion === CURRENT_UGC_TERMS_VERSION
-          && acceptedTermsVersion === CURRENT_UGC_TERMS_VERSION}
+          && serverTermsDigest === CURRENT_UGC_TERMS_DIGEST
+          && acceptedTermsVersion === CURRENT_UGC_TERMS_VERSION
+          && acceptedTermsDigest === CURRENT_UGC_TERMS_DIGEST}
         checking={!termsChecked && !termsError}
         saving={acceptingTerms}
         error={termsError}
@@ -542,6 +1162,34 @@ function friendlyError(message: string) { if (message.includes("duplicate key"))
 function isStrongPassword(value: string) { return value.length >= 8 && value.length <= 72 && /[a-z]/.test(value) && /[A-Z]/.test(value) && /[0-9]/.test(value) && /[^A-Za-z0-9]/.test(value); }
 async function edgeFunctionError(error: unknown) { const candidate = error as { context?: Response; message?: string }; try { const body = await candidate.context?.json() as { error?: string } | undefined; if (body?.error) return body.error; } catch { /* İstemci mesajına dönülür. */ } return candidate.message ?? "İşlem tamamlanamadı."; }
 
+type DeletionFunctionErrorDetails = {
+  message: string;
+  code?: string;
+  deletionRequestId?: string;
+};
+
+async function deletionFunctionErrorDetails(error: unknown): Promise<DeletionFunctionErrorDetails> {
+  const candidate = error as { context?: Response; message?: string };
+  try {
+    const body = await candidate.context?.json() as {
+      error?: unknown;
+      code?: unknown;
+      deletionRequestId?: unknown;
+    } | undefined;
+    return {
+      message: typeof body?.error === "string"
+        ? body.error
+        : candidate.message ?? "Hesap silme işlemi tamamlanamadı.",
+      code: typeof body?.code === "string" ? body.code : undefined,
+      deletionRequestId: isDeletionRequestId(body?.deletionRequestId)
+        ? body.deletionRequestId
+        : undefined,
+    };
+  } catch {
+    return { message: candidate.message ?? "Hesap silme işlemi tamamlanamadı." };
+  }
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#172820" }, listContent: { paddingBottom: 110, backgroundColor: "#f4f5f1" },
   header: { paddingHorizontal: 18, paddingTop: 17, paddingBottom: 24, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#172820" },
@@ -557,6 +1205,7 @@ const styles = StyleSheet.create({
   lowFilter: { paddingHorizontal: 11, paddingVertical: 8, borderWidth: 1, borderColor: "#dbe0db", borderRadius: 9, backgroundColor: "#fff" }, lowFilterActive: { borderColor: "#c6dfd2", backgroundColor: "#e7f3ed" }, lowFilterText: { color: "#65706a", fontSize: 10, fontWeight: "800" }, lowFilterTextActive: { color: "#277053" },
   searchBox: { height: 45, marginHorizontal: 14, marginBottom: 11, paddingHorizontal: 13, flexDirection: "row", alignItems: "center", gap: 9, borderWidth: 1, borderColor: "#dfe3df", borderRadius: 12, backgroundColor: "#fff" }, searchIcon: { color: "#66736c", fontSize: 19 }, searchInput: { flex: 1, color: "#1b2721", fontSize: 12 },
   loadingBox: { paddingVertical: 30, alignItems: "center", gap: 9 }, loadingText: { color: "#77807b", fontSize: 11 },
+  pageLoading: { minHeight: 54, marginHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9 },
   productCard: { marginHorizontal: 14, marginBottom: 11, overflow: "hidden", borderWidth: 1, borderColor: "#e2e5e1", borderRadius: 15, backgroundColor: "#fff" }, productInfo: { padding: 14 }, productTop: { flexDirection: "row", alignItems: "center" }, productMark: { width: 38, height: 38, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: "#e7f1ec" }, productMarkText: { color: "#337559", fontSize: 15, fontWeight: "900" }, productNames: { flex: 1, minWidth: 0, marginLeft: 10 }, productName: { color: "#1b2721", fontSize: 13, fontWeight: "800" }, productMeta: { marginTop: 4, color: "#909792", fontSize: 9 }, badge: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 20 }, badgeOk: { backgroundColor: "#e6f2eb" }, badgeLow: { backgroundColor: "#fff0db" }, badgeCritical: { backgroundColor: "#f9e4e0" }, badgeText: { fontSize: 8, fontWeight: "900" }, badgeTextOk: { color: "#347457" }, badgeTextLow: { color: "#a56620" }, badgeTextCritical: { color: "#ad4e44" },
   stockRow: { marginTop: 16, paddingTop: 13, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", borderTopWidth: 1, borderTopColor: "#eff1ee" }, stockLabel: { color: "#929994", fontSize: 7, fontWeight: "900", letterSpacing: .8 }, stockValue: { marginTop: 4, color: "#1a2721", fontSize: 22, fontWeight: "800" }, stockUnit: { color: "#68716c", fontSize: 10, fontWeight: "600" }, minBox: { alignItems: "flex-end" }, minValue: { marginTop: 5, color: "#69726d", fontSize: 10, fontWeight: "700" },
   productActions: { minHeight: 44, flexDirection: "row", borderTopWidth: 1, borderTopColor: "#edf0ec" }, actionIn: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", backgroundColor: "#edf6f1" }, actionOut: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", borderLeftWidth: 1, borderLeftColor: "#e5e9e5", backgroundColor: "#fff8ee" }, actionReport: { width: 76, minHeight: 44, alignItems: "center", justifyContent: "center", borderLeftWidth: 1, borderLeftColor: "#e5e9e5", backgroundColor: "#f7f7f4" }, actionInText: { color: "#2b7354", fontSize: 10, fontWeight: "900" }, actionOutText: { color: "#9b6323", fontSize: 10, fontWeight: "900" }, actionReportText: { color: "#747d78", fontSize: 9, fontWeight: "900" },

@@ -97,7 +97,7 @@ export default function ContentReportModal({ target, saving, error = "", onClose
             <Text style={styles.counter}>{details.length}/1000</Text>
 
             {error ? <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text> : null}
-            <Text style={styles.notice}>Bildirim, işletme yöneticisinin Güvenlik Merkezi’ne iletilir. Kötü niyetli veya tekrarlanan asılsız bildirimler kullanım koşullarını ihlal eder.</Text>
+            <Text style={styles.notice}>Bildirim, hedefin rolüne göre yetkili inceleme kuyruğuna iletilir. Kötü niyetli veya tekrarlanan asılsız bildirimler kullanım koşullarını ihlal eder.</Text>
 
             <Pressable
               accessibilityRole="button"

@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { randomUUID } from "expo-crypto";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
+import { isTransientSupabaseError, retryTransientSupabaseOperation } from "../lib/auth-retry";
 import type {
   ContentModerationAction,
   ContentReport,
@@ -23,6 +28,10 @@ import type {
 
 type Filter = "open" | "resolved" | "all";
 type SafetyCenterScope = "organization" | "platform";
+type PendingModeration = { report: ContentReport; action: ContentModerationAction };
+type ModerationAttempt = { signature: string; requestId: string };
+
+const REPORT_PAGE_SIZE = 50;
 
 type Props = {
   visible: boolean;
@@ -36,53 +45,154 @@ export default function SafetyCenterModal({ visible, scope, onClose, onModerated
   const [reports, setReports] = useState<ContentReport[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreReports, setHasMoreReports] = useState(false);
   const [error, setError] = useState("");
   const [moderatingId, setModeratingId] = useState<string | null>(null);
+  const [pendingModeration, setPendingModeration] = useState<PendingModeration | null>(null);
+  const [moderationNote, setModerationNote] = useState("");
   const loadSequence = useRef(0);
+  const moderationSequence = useRef(0);
+  const moderationAttemptRef = useRef<ModerationAttempt | null>(null);
+  const loadingMoreRef = useRef(false);
+  const reportQueryRef = useRef({ filter, scope });
+  const mountedRef = useRef(true);
+  reportQueryRef.current = { filter, scope };
 
   const loadReports = useCallback(async (quiet = false) => {
+    const activeQuery = reportQueryRef.current;
     const requestId = ++loadSequence.current;
     if (quiet) setRefreshing(true);
     else {
       setLoading(true);
       setReports([]);
     }
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+    setHasMoreReports(false);
     setError("");
-    const { data, error: listError } = scope === "platform"
-      ? await supabase.rpc("list_platform_content_reports", { p_status: filter })
-      : await supabase.rpc("list_content_reports", { p_status: filter });
-    if (requestId !== loadSequence.current) return;
-    if (listError) setError(safeModerationError(listError.message, scope));
-    else setReports((data ?? []) as ContentReport[]);
+    const { data, error: listError } = await retryTransientSupabaseOperation(() => activeQuery.scope === "platform"
+      ? supabase.rpc("list_platform_content_reports", {
+        p_status: activeQuery.filter, p_before_created_at: null, p_before_id: null, p_limit: REPORT_PAGE_SIZE + 1,
+      })
+      : supabase.rpc("list_content_reports", {
+        p_status: activeQuery.filter, p_before_created_at: null, p_before_id: null, p_limit: REPORT_PAGE_SIZE + 1,
+      }));
+    if (!mountedRef.current || requestId !== loadSequence.current) return;
+    if (listError) {
+      setError(safeModerationError(listError.message, activeQuery.scope));
+    } else {
+      const page = (data ?? []) as ContentReport[];
+      setReports(page.slice(0, REPORT_PAGE_SIZE));
+      setHasMoreReports(page.length > REPORT_PAGE_SIZE);
+    }
     setLoading(false);
     setRefreshing(false);
-  }, [filter, scope]);
+  }, []);
+
+  async function loadMoreReports() {
+    if (!visible || loading || refreshing || loadingMoreRef.current || !hasMoreReports) return;
+    const cursor = reports.at(-1);
+    if (!cursor) return;
+    const requestId = loadSequence.current;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setError("");
+    const { data, error: listError } = await retryTransientSupabaseOperation(() => scope === "platform"
+      ? supabase.rpc("list_platform_content_reports", {
+        p_status: filter,
+        p_before_created_at: cursor.created_at,
+        p_before_id: cursor.report_id,
+        p_limit: REPORT_PAGE_SIZE + 1,
+      })
+      : supabase.rpc("list_content_reports", {
+        p_status: filter,
+        p_before_created_at: cursor.created_at,
+        p_before_id: cursor.report_id,
+        p_limit: REPORT_PAGE_SIZE + 1,
+      }));
+    if (!mountedRef.current || requestId !== loadSequence.current) return;
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+    if (listError) {
+      setError(safeModerationError(listError.message, scope));
+      return;
+    }
+    const page = (data ?? []) as ContentReport[];
+    const visiblePage = page.slice(0, REPORT_PAGE_SIZE);
+    setReports((current) => {
+      const byId = new Map(current.map((report) => [report.report_id, report]));
+      for (const report of visiblePage) byId.set(report.report_id, report);
+      return [...byId.values()].sort(compareReportsNewestFirst);
+    });
+    setHasMoreReports(page.length > REPORT_PAGE_SIZE);
+  }
 
   useEffect(() => {
     if (visible) void loadReports();
-  }, [loadReports, visible]);
+    else {
+      loadSequence.current += 1;
+      moderationSequence.current += 1;
+      setPendingModeration(null);
+      setModerationNote("");
+      setModeratingId(null);
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      setHasMoreReports(false);
+    }
+  }, [filter, loadReports, scope, visible]);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    loadSequence.current += 1;
+    moderationSequence.current += 1;
+  }, []);
 
   function requestModeration(report: ContentReport, action: ContentModerationAction) {
     const copy = moderationCopy(report, action);
+    if (action !== "dismiss") {
+      setModerationNote("");
+      setPendingModeration({ report, action });
+      return;
+    }
     Alert.alert(copy.title, copy.message, [
       { text: "Vazgeç", style: "cancel" },
       {
         text: copy.confirm,
         style: action === "dismiss" ? "default" : "destructive",
-        onPress: () => void moderate(report.report_id, action),
+        onPress: () => void moderate(report.report_id, action, ""),
       },
     ]);
   }
 
-  async function moderate(reportId: string, action: ContentModerationAction) {
+  async function moderate(reportId: string, action: ContentModerationAction, note: string) {
+    if (moderatingId) return;
+    const normalizedNote = note.trim();
+    if (action !== "dismiss" && !normalizedNote) {
+      Alert.alert("Gerekçe gerekli", "Bu işlemi uygulama nedeninizi yazın.");
+      return;
+    }
+    const signature = JSON.stringify({ scope, reportId, action, note: normalizedNote });
+    if (moderationAttemptRef.current?.signature !== signature && moderationAttemptRef.current) {
+      Alert.alert(
+        "Önceki karar bekliyor",
+        "Önceki moderasyon kararının sonucu doğrulanmadı. Çifte işlem oluşmaması için aynı rapor, karar ve gerekçeyle tekrar deneyin.",
+      );
+      return;
+    }
+    const requestId = moderationAttemptRef.current?.requestId ?? randomUUID();
+    moderationAttemptRef.current = { signature, requestId };
+    const sequence = ++moderationSequence.current;
     setModeratingId(reportId);
     setError("");
-    const args = { p_report_id: reportId, p_action: action, p_note: "" };
-    const { error: moderationError } = scope === "platform"
-      ? await supabase.rpc("moderate_platform_content_report", args)
-      : await supabase.rpc("moderate_content_report", args);
+    const args = { p_report_id: reportId, p_action: action, p_note: normalizedNote, p_request_id: requestId };
+    const { data, error: moderationError } = await retryTransientSupabaseOperation(() => scope === "platform"
+      ? supabase.rpc("moderate_platform_content_report", args)
+      : supabase.rpc("moderate_content_report", args));
+    if (!mountedRef.current || sequence !== moderationSequence.current) return;
     setModeratingId(null);
     if (moderationError) {
+      if (!isAmbiguousModerationError(moderationError)) moderationAttemptRef.current = null;
       Alert.alert("İşlem tamamlanamadı", safeModerationError(
         moderationError.message,
         scope,
@@ -90,12 +200,45 @@ export default function SafetyCenterModal({ visible, scope, onClose, onModerated
       ));
       return;
     }
+    const result = data as { report_id?: string; status?: string; action?: string; request_id?: string } | null;
+    if (result?.report_id !== reportId || result.status !== "resolved"
+      || result.action !== action || result.request_id !== requestId) {
+      Alert.alert("İşlem sonucu doğrulanamadı", "Sunucu onayı eşleşmedi. Aynı işlemle yeniden deneyin.");
+      return;
+    }
+    moderationAttemptRef.current = null;
+    setPendingModeration(null);
+    setModerationNote("");
     onModerated?.();
     await loadReports();
   }
 
+  function closeSafetyCenter() {
+    if (moderatingId || moderationAttemptRef.current) {
+      Alert.alert(
+        "İşlem sonucu bekleniyor",
+        "Moderasyon sonucu doğrulanana kadar bu ekranı kapatmayın; aynı karar ve gerekçeyle tekrar deneyin.",
+      );
+      return;
+    }
+    onClose();
+  }
+
+  function cancelPendingModeration() {
+    if (moderatingId || moderationAttemptRef.current) {
+      Alert.alert(
+        "İşlem sonucu bekleniyor",
+        "Önceki kararın sonucu doğrulanana kadar aynı gerekçeyle tekrar deneyin.",
+      );
+      return;
+    }
+    setPendingModeration(null);
+  }
+
+  const hasUnresolvedModeration = Boolean(moderationAttemptRef.current);
+
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={moderatingId ? () => undefined : onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={closeSafetyCenter}>
       <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
         <View style={styles.header}>
           <View style={styles.headerText}>
@@ -107,7 +250,7 @@ export default function SafetyCenterModal({ visible, scope, onClose, onModerated
             accessibilityRole="button"
             accessibilityLabel={scope === "platform" ? "Platform Güvenlik Kuyruğunu kapat" : "Güvenlik Merkezini kapat"}
             style={styles.closeButton}
-            onPress={onClose}
+            onPress={closeSafetyCenter}
             disabled={Boolean(moderatingId)}
           >
             <Text style={styles.closeText}>×</Text>
@@ -115,9 +258,9 @@ export default function SafetyCenterModal({ visible, scope, onClose, onModerated
         </View>
 
         <View style={styles.filters} accessibilityRole="tablist">
-          <FilterButton label="Açık" active={filter === "open"} onPress={() => setFilter("open")} />
-          <FilterButton label="Çözülen" active={filter === "resolved"} onPress={() => setFilter("resolved")} />
-          <FilterButton label="Tümü" active={filter === "all"} onPress={() => setFilter("all")} />
+          <FilterButton label="Açık" active={filter === "open"} disabled={Boolean(moderatingId) || hasUnresolvedModeration} onPress={() => setFilter("open")} />
+          <FilterButton label="Çözülen" active={filter === "resolved"} disabled={Boolean(moderatingId) || hasUnresolvedModeration} onPress={() => setFilter("resolved")} />
+          <FilterButton label="Tümü" active={filter === "all"} disabled={Boolean(moderatingId) || hasUnresolvedModeration} onPress={() => setFilter("all")} />
         </View>
 
         {error ? (
@@ -155,20 +298,84 @@ export default function SafetyCenterModal({ visible, scope, onClose, onModerated
                 <Text style={styles.emptyText}>Yeni bildirimler burada görünür. Listeyi aşağı çekerek yenileyebilirsiniz.</Text>
               </View>
             )}
+            {reports.length && hasMoreReports ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Daha eski bildirimleri yükle"
+                style={[styles.loadMoreButton, loadingMore && styles.disabled]}
+                onPress={() => void loadMoreReports()}
+                disabled={loadingMore}
+              >
+                {loadingMore
+                  ? <ActivityIndicator color="#1f7353" />
+                  : <Text style={styles.loadMoreText}>Daha fazla göster</Text>}
+              </Pressable>
+            ) : null}
           </ScrollView>
         )}
+        <Modal
+          visible={Boolean(pendingModeration)}
+          transparent
+          animationType="fade"
+          onRequestClose={cancelPendingModeration}
+        >
+          <KeyboardAvoidingView style={styles.reasonBackdrop} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+            <View style={styles.reasonCard}>
+              <Text style={styles.reasonTitle}>{pendingModeration ? moderationCopy(pendingModeration.report, pendingModeration.action).title : "Moderasyon gerekçesi"}</Text>
+              <Text style={styles.reasonBody}>{pendingModeration ? moderationCopy(pendingModeration.report, pendingModeration.action).message : ""}</Text>
+              <Text style={styles.reasonLabel}>Gerekçe</Text>
+              <TextInput
+                style={styles.reasonInput}
+                value={moderationNote}
+                onChangeText={setModerationNote}
+                placeholder="Kararınızın açık ve ölçülü gerekçesini yazın"
+                placeholderTextColor="#939d97"
+                multiline
+                maxLength={500}
+                editable={!moderatingId && !hasUnresolvedModeration}
+                autoFocus
+              />
+              <Text style={styles.reasonCount}>{moderationNote.length}/500</Text>
+              <View style={styles.reasonActions}>
+                <Pressable style={[styles.reasonCancel, (moderatingId || hasUnresolvedModeration) && styles.disabled]} onPress={cancelPendingModeration} disabled={Boolean(moderatingId) || hasUnresolvedModeration} accessibilityRole="button">
+                  <Text style={styles.reasonCancelText}>Vazgeç</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.reasonConfirm, (!moderationNote.trim() || moderatingId) && styles.disabled]}
+                  onPress={() => pendingModeration && void moderate(pendingModeration.report.report_id, pendingModeration.action, moderationNote)}
+                  disabled={!moderationNote.trim() || Boolean(moderatingId)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Gerekçeyi kaydet ve moderasyon işlemini uygula"
+                >
+                  {moderatingId ? <ActivityIndicator color="#fff" /> : <Text style={styles.reasonConfirmText}>Kararı uygula</Text>}
+                </Pressable>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </SafeAreaView>
     </Modal>
   );
 }
 
-function FilterButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+function FilterButton({
+  label,
+  active,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
   return (
     <Pressable
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
-      style={[styles.filterButton, active && styles.filterButtonActive]}
+      style={[styles.filterButton, active && styles.filterButtonActive, disabled && styles.disabled]}
       onPress={onPress}
+      disabled={disabled}
     >
       <Text style={[styles.filterText, active && styles.filterTextActive]}>{label}</Text>
     </Pressable>
@@ -387,6 +594,17 @@ function formatTimestamp(value: string) {
   return new Date(value).toLocaleString("tr-TR", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function compareReportsNewestFirst(left: ContentReport, right: ContentReport) {
+  const byTime = right.created_at.localeCompare(left.created_at);
+  return byTime || right.report_id.localeCompare(left.report_id);
+}
+
+function isAmbiguousModerationError(error: unknown) {
+  const status = (error as { context?: { status?: number }; status?: number })?.context?.status
+    ?? (error as { status?: number })?.status;
+  return isTransientSupabaseError(error, status);
+}
+
 function safeModerationError(message: string, scope: SafetyCenterScope, fallback = "Bildirimler yüklenemedi. Lütfen yeniden deneyin.") {
   const normalized = message.toLocaleLowerCase("tr-TR");
   if (normalized.includes("oturum")) return "Oturumunuz sona erdi. Yeniden giriş yapın.";
@@ -452,5 +670,19 @@ const styles = StyleSheet.create({
   resolutionBox: { marginTop: 13, padding: 11, borderRadius: 10, backgroundColor: "#edf5f0" },
   resolutionTitle: { color: "#347457", fontSize: 10, fontWeight: "900" },
   resolutionText: { marginTop: 4, color: "#718078", fontSize: 8 },
+  loadMoreButton: { minHeight: 44, marginTop: 2, marginBottom: 8, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#cfd8d2", borderRadius: 11, backgroundColor: "#fff" },
+  loadMoreText: { color: "#276f52", fontSize: 10, fontWeight: "900" },
+  reasonBackdrop: { flex: 1, justifyContent: "center", padding: 20, backgroundColor: "#0c1813b8" },
+  reasonCard: { padding: 18, borderRadius: 17, backgroundColor: "#f8f8f5" },
+  reasonTitle: { color: "#1d2a24", fontSize: 18, fontWeight: "900" },
+  reasonBody: { marginTop: 7, color: "#69736d", fontSize: 10, lineHeight: 16 },
+  reasonLabel: { marginTop: 16, marginBottom: 7, color: "#56635c", fontSize: 10, fontWeight: "900" },
+  reasonInput: { minHeight: 104, padding: 12, borderWidth: 1, borderColor: "#d9dfda", borderRadius: 11, backgroundColor: "#fff", color: "#1d2a24", fontSize: 12, lineHeight: 18, textAlignVertical: "top" },
+  reasonCount: { marginTop: 5, color: "#8b948f", textAlign: "right", fontSize: 8 },
+  reasonActions: { marginTop: 13, flexDirection: "row", gap: 9 },
+  reasonCancel: { flex: 1, minHeight: 45, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#d8ded9", borderRadius: 10, backgroundColor: "#fff" },
+  reasonCancelText: { color: "#5e6a63", fontSize: 10, fontWeight: "900" },
+  reasonConfirm: { flex: 1, minHeight: 45, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#a94e44" },
+  reasonConfirmText: { color: "#fff", fontSize: 10, fontWeight: "900" },
   disabled: { opacity: .5 },
 });

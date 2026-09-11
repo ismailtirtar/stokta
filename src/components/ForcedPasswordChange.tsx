@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,6 +13,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
+import {
+  isTransientSupabaseError,
+  retryTransientSupabaseOperation,
+  withOperationTimeout,
+} from "../lib/auth-retry";
 
 export default function ForcedPasswordChange() {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -19,8 +25,18 @@ export default function ForcedPasswordChange() {
   const [newPasswordAgain, setNewPasswordAgain] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const actionInFlightRef = useRef(false);
+  const requestSequenceRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    requestSequenceRef.current += 1;
+    actionInFlightRef.current = false;
+  }, []);
 
   async function changePassword() {
+    if (actionInFlightRef.current) return;
     if (!currentPassword) {
       setError("Geçici şifrenizi girin.");
       return;
@@ -38,17 +54,86 @@ export default function ForcedPasswordChange() {
       return;
     }
 
+    const requestSequence = ++requestSequenceRef.current;
+    actionInFlightRef.current = true;
     setLoading(true);
     setError("");
-    const { error: changeError } = await supabase.functions.invoke("account-security", {
-      body: { action: "change-password", currentPassword, newPassword },
-    });
-    setLoading(false);
+    let result: { data: unknown; error: unknown; status?: number };
+    try {
+      // This mutation is intentionally attempted once. A response timeout can
+      // happen after the password was changed, so blindly sending it again with
+      // the old password would not be a safe retry.
+      result = await withOperationTimeout(
+        supabase.functions.invoke("account-security", {
+          body: { action: "change-password", currentPassword, newPassword },
+        }),
+        30_000,
+        "Şifre değiştirme isteği zaman aşımına uğradı",
+      );
+    } catch (changeError) {
+      result = { data: null, error: changeError };
+    }
+    if (!mountedRef.current || requestSequence !== requestSequenceRef.current) return;
+    const { data, error: changeError } = result;
     if (changeError) {
-      setError(await edgeFunctionError(changeError));
+      const details = await edgeFunctionErrorDetails(changeError);
+      if (!mountedRef.current || requestSequence !== requestSequenceRef.current) return;
+      actionInFlightRef.current = false;
+      setLoading(false);
+      const definitelyInvalidPassword = details.status === 401
+        && details.message === "Mevcut şifre hatalı";
+      if (!definitelyInvalidPassword
+        && (details.status === 401
+          || (typeof details.status === "number" && details.status >= 500)
+          || isTransientSupabaseError(changeError, details.status))) {
+        promptForSafeReauthentication(requestSequence, details.message);
+        return;
+      }
+      setError(details.message);
       return;
     }
-    await supabase.auth.signOut({ scope: "local" });
+    const response = data && typeof data === "object"
+      ? data as { updated?: unknown; reauthenticationRequired?: unknown }
+      : null;
+    if (response?.updated !== true || response.reauthenticationRequired !== true) {
+      actionInFlightRef.current = false;
+      setLoading(false);
+      promptForSafeReauthentication(requestSequence, "Sunucu yanıtı doğrulanamadı.");
+      return;
+    }
+    setCurrentPassword("");
+    setNewPassword("");
+    setNewPasswordAgain("");
+    await signOutLocally(requestSequence);
+  }
+
+  function promptForSafeReauthentication(requestSequence: number, detail: string) {
+    setCurrentPassword("");
+    setNewPassword("");
+    setNewPasswordAgain("");
+    Alert.alert(
+      "Şifre değişikliği doğrulanamadı",
+      `${detail} İstek sunucuda tamamlanmış olabilir. Güvenlik için oturumu kapatıp önce yeni şifrenizle giriş yapın; çalışmazsa eski şifrenizi deneyin.`,
+      [{ text: "Giriş ekranına dön", onPress: () => void signOutLocally(requestSequence) }],
+      { cancelable: false },
+    );
+  }
+
+  async function signOutLocally(requestSequence: number) {
+    if (!mountedRef.current || requestSequence !== requestSequenceRef.current) return;
+    actionInFlightRef.current = true;
+    setLoading(true);
+    const { error: signOutError } = await retryTransientSupabaseOperation(
+      () => supabase.auth.signOut({ scope: "local" }),
+      250,
+      8_000,
+    );
+    if (!mountedRef.current || requestSequence !== requestSequenceRef.current) return;
+    actionInFlightRef.current = false;
+    setLoading(false);
+    if (signOutError) {
+      setError("Yerel oturum kapatılamadı. Uygulamayı tamamen kapatıp yeniden açın ve yeni şifrenizle giriş yapın.");
+    }
   }
 
   return (
@@ -86,15 +171,17 @@ function isStrongPassword(value: string) {
     && /[0-9]/.test(value) && /[^A-Za-z0-9]/.test(value);
 }
 
-async function edgeFunctionError(error: unknown) {
+type EdgeFunctionErrorDetails = { message: string; status?: number };
+
+async function edgeFunctionErrorDetails(error: unknown): Promise<EdgeFunctionErrorDetails> {
   const candidate = error as { context?: Response; message?: string };
   try {
     const body = await candidate.context?.json() as { error?: string } | undefined;
-    if (body?.error) return body.error;
+    if (body?.error) return { message: body.error, status: candidate.context?.status };
   } catch {
     // Yanıt gövdesi yoksa istemci mesajına dönülür.
   }
-  return candidate.message ?? "Şifre değiştirilemedi.";
+  return { message: candidate.message ?? "Şifre değiştirilemedi.", status: candidate.context?.status };
 }
 
 const styles = StyleSheet.create({
