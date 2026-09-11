@@ -3,26 +3,104 @@ name: Stokdaş Android Production
 on:
   push:
     branches:
-      - codex/stokdas-live-security-sync
-    paths:
-      - .github/eas-build-trigger
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       build_id:
-        description: Existing successful EAS build ID to reuse
+        description: Existing successful EAS build ID from the current main commit
         required: false
         type: string
 
 concurrency:
-  group: stokdas-eas-android-production
-  cancel-in-progress: false
+  group: stokdas-eas-android-production-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  validate:
+    name: Validate Android release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      app_identifier: ${{ steps.release_config.outputs.app_identifier }}
+      app_version: ${{ steps.release_config.outputs.app_version }}
+      eas_project_id: ${{ steps.release_config.outputs.eas_project_id }}
+
+    steps:
+      - name: Require main for manual releases
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Manual Android releases must be dispatched from the main branch."
+          exit 1
+
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify TypeScript
+        run: npm run typecheck
+
+      - name: Verify release configuration
+        id: release_config
+        run: |
+          set -euo pipefail
+
+          PACKAGE_VERSION="$(jq -er '.version' package.json)"
+          APP_VERSION="$(jq -er '.expo.version' app.json)"
+          APP_IDENTIFIER="$(jq -er '.expo.android.package' app.json)"
+          SUBMIT_IDENTIFIER="$(jq -er '.submit.production.android.applicationId' eas.json)"
+          EAS_PROJECT_ID="$(jq -er '.expo.extra.eas.projectId' app.json)"
+          VERSION_SOURCE="$(jq -er '.cli.appVersionSource' eas.json)"
+          BUILD_TYPE="$(jq -er '.build.production.android.buildType' eas.json)"
+
+          if [ "$PACKAGE_VERSION" != "$APP_VERSION" ]; then
+            echo "::error::package.json version ($PACKAGE_VERSION) and app.json version ($APP_VERSION) differ."
+            exit 1
+          fi
+          if [ "$APP_IDENTIFIER" != "$SUBMIT_IDENTIFIER" ]; then
+            echo "::error::Android build and submit application IDs differ."
+            exit 1
+          fi
+          if [ "$VERSION_SOURCE" != "remote" ]; then
+            echo "::error::Production version codes must use the EAS remote version source."
+            exit 1
+          fi
+          if ! jq -e '.build.production.autoIncrement == true' eas.json >/dev/null; then
+            echo "::error::The production build must auto-increment the remote Android version code."
+            exit 1
+          fi
+          if [ "$BUILD_TYPE" != "app-bundle" ]; then
+            echo "::error::The production Android build must create an app bundle."
+            exit 1
+          fi
+          if ! jq -e '.expo.android.versionCode | numbers and . > 0' app.json >/dev/null; then
+            echo "::error::app.json must retain a positive fallback Android versionCode."
+            exit 1
+          fi
+
+          echo "app_identifier=$APP_IDENTIFIER" >> "$GITHUB_OUTPUT"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "eas_project_id=$EAS_PROJECT_ID" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build signed Android App Bundle
+    if: github.event_name != 'pull_request'
+    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -30,63 +108,70 @@ jobs:
       REQUESTED_BUILD_ID: ${{ inputs.build_id || '' }}
 
     steps:
-      - name: Check Expo authentication
-        id: expo_auth
-        shell: bash
+      - name: Require Expo authentication
         run: |
-          if [ -n "$EXPO_TOKEN" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::EXPO_TOKEN is not configured; EAS build was safely skipped."
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN is not configured; the production build cannot run."
+            exit 1
           fi
 
-      - name: Checkout PR source
-        if: steps.expo_auth.outputs.available == 'true'
-        uses: actions/checkout@v4
+      - name: Checkout release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
+      - name: Capture main commit
+        id: source
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Production builds must use the main branch."
+            exit 1
+          fi
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          if [ "$RELEASE_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked-out commit $RELEASE_SHA does not match workflow commit $GITHUB_SHA."
+            exit 1
+          fi
+          echo "git_commit=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
-        if: steps.expo_auth.outputs.available == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
-        if: steps.expo_auth.outputs.available == 'true'
         run: npm ci
 
-      - name: Verify TypeScript
-        if: steps.expo_auth.outputs.available == 'true'
-        run: npm run typecheck
-
       - name: Set up EAS CLI
-        if: steps.expo_auth.outputs.available == 'true'
-        uses: expo/expo-github-action@v8
+        uses: expo/expo-github-action@c7b66a9c327a43a8fa7c0158e7f30d6040d2481e # v8
         with:
           eas-version: 23.0.0
           packager: npm
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Resolve successful EAS build
-        if: steps.expo_auth.outputs.available == 'true'
+      - name: Resolve and verify EAS build
         id: eas_build
-        shell: bash
+        env:
+          EXPECTED_APPLICATION_ID: ${{ needs.validate.outputs.app_identifier }}
+          EXPECTED_GIT_COMMIT: ${{ steps.source.outputs.git_commit }}
+          EXPECTED_PROJECT_ID: ${{ needs.validate.outputs.eas_project_id }}
+          EXPECTED_VERSION: ${{ needs.validate.outputs.app_version }}
         run: |
+          set -euo pipefail
           BUILD_ID="$REQUESTED_BUILD_ID"
-          if [ -z "$BUILD_ID" ] && [ -f .github/eas-build-trigger ]; then
-            BUILD_ID="$(sed -n 's/^build_id=//p' .github/eas-build-trigger | head -n 1 | tr -d '\r')"
-          fi
 
+          if [ -n "$BUILD_ID" ] && ! [[ "$BUILD_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "::error::The supplied EAS build ID is not a UUID."
+            exit 1
+          fi
           if [ -z "$BUILD_ID" ]; then
             eas build --platform android --profile production --non-interactive --wait --json > eas-build-submit.json
             BUILD_ID="$(jq -r 'if type == "array" then .[0].id else .id end' eas-build-submit.json)"
           else
-            echo "::notice::Reusing successful EAS build $BUILD_ID."
+            echo "::notice::Reusing EAS build $BUILD_ID after provenance verification."
           fi
-
           if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" = "null" ]; then
             echo "::error::EAS build ID could not be determined."
             exit 1
@@ -95,18 +180,47 @@ jobs:
           eas build:view "$BUILD_ID" --json > eas-build.json
           STATUS="$(jq -r '.status // empty' eas-build.json)"
           PLATFORM="$(jq -r '.platform // empty' eas-build.json)"
+          VERSION="$(jq -r '.appVersion // empty' eas-build.json)"
+          VERSION_CODE="$(jq -r '.appBuildVersion // empty' eas-build.json)"
+          APPLICATION_ID="$(jq -r '.appIdentifier // empty' eas-build.json)"
+          PROJECT_ID="$(jq -r '.app.id // empty' eas-build.json)"
+          BUILD_PROFILE="$(jq -r '.buildProfile // empty' eas-build.json)"
+          DISTRIBUTION="$(jq -r '.distribution // empty' eas-build.json)"
+          GIT_COMMIT="$(jq -r '.gitCommitHash // empty' eas-build.json)"
+
           if [ "$STATUS" != "FINISHED" ] || [ "$PLATFORM" != "ANDROID" ]; then
             echo "::error::EAS build is not a finished Android build (status=$STATUS, platform=$PLATFORM)."
             exit 1
           fi
+          if [ "$VERSION" != "$EXPECTED_VERSION" ] || [ "$APPLICATION_ID" != "$EXPECTED_APPLICATION_ID" ]; then
+            echo "::error::EAS build identity does not match the checked-out application."
+            exit 1
+          fi
+          if [ "$PROJECT_ID" != "$EXPECTED_PROJECT_ID" ] || [ "$BUILD_PROFILE" != "production" ] || [ "$DISTRIBUTION" != "STORE" ]; then
+            echo "::error::EAS build project, profile, or distribution is not the Stokdaş production release."
+            exit 1
+          fi
+          if [ "$GIT_COMMIT" != "$EXPECTED_GIT_COMMIT" ]; then
+            echo "::error::EAS build commit $GIT_COMMIT does not match main commit $EXPECTED_GIT_COMMIT."
+            exit 1
+          fi
+          if ! [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid Android version code $VERSION_CODE."
+            exit 1
+          fi
+
           echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
 
       - name: Download and verify signed AAB
-        if: steps.expo_auth.outputs.available == 'true'
-        shell: bash
         env:
+          APP_VERSION: ${{ needs.validate.outputs.app_version }}
           BUILD_ID: ${{ steps.eas_build.outputs.build_id }}
+          VERSION_CODE: ${{ steps.eas_build.outputs.version_code }}
         run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          AAB_FILE="release-artifacts/stokdas-${APP_VERSION}-${VERSION_CODE}.aab"
           AAB_URL="$(jq -r '.artifacts.applicationArchiveUrl // empty' eas-build.json)"
           if [ -z "$AAB_URL" ]; then
             echo "::error::EAS build has no application archive URL."
@@ -114,23 +228,26 @@ jobs:
           fi
 
           curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
-            --connect-timeout 30 --output stokdas-1.3.4.aab "$AAB_URL"
-          if [ ! -s stokdas-1.3.4.aab ]; then
+            --connect-timeout 30 --output "$AAB_FILE" "$AAB_URL"
+          if [ ! -s "$AAB_FILE" ]; then
             echo "::error::Downloaded AAB is empty or missing."
             exit 1
           fi
-          unzip -tq stokdas-1.3.4.aab
-          sha256sum stokdas-1.3.4.aab > stokdas-1.3.4.aab.sha256
-          echo "EAS build: $BUILD_ID"
+          unzip -tq "$AAB_FILE"
+          sha256sum "$AAB_FILE" > "$AAB_FILE.sha256"
+          cp eas-build.json release-artifacts/eas-build.json
+          jq -n \
+            --arg build_id "$BUILD_ID" \
+            --arg git_commit "${{ steps.source.outputs.git_commit }}" \
+            --arg version "$APP_VERSION" \
+            --arg version_code "$VERSION_CODE" \
+            '{buildId: $build_id, gitCommitHash: $git_commit, appVersion: $version, appBuildVersion: $version_code}' \
+            > release-artifacts/release-provenance.json
 
       - name: Upload AAB artifact
-        if: steps.expo_auth.outputs.available == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: stokdas-1.3.4-android-aab
-          path: |
-            stokdas-1.3.4.aab
-            stokdas-1.3.4.aab.sha256
-            eas-build.json
+          name: stokdas-${{ needs.validate.outputs.app_version }}-${{ steps.eas_build.outputs.version_code }}-android-aab
+          path: release-artifacts/
           if-no-files-found: error
           retention-days: 30
