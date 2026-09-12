@@ -37,8 +37,10 @@
 - [ ] Google Cloud Android Publisher servis hesabı ve JSON anahtarı oluşturulmalı
 - [ ] Servis hesabına Play Console'da finansal veri görüntüleme ile sipariş/abonelik yönetme izinleri verilmeli
 - [ ] Android Publisher doğrulama hesabı JSON'u yalnız Supabase `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret'ına eklenmeli; EAS gönderimi gerekiyorsa ayrı ve daha dar yetkili bir hesap/anahtar kullanılmalı
-- [ ] `stokdas_pro` abonelik ürünü ile `monthly` otomatik yenilenen base plan oluşturulup etkinleştirilmeli
-- [ ] Aylık TRY fiyatı ve satış yapılacak ülkeler kesinleştirilmeli
+- [x] `stokdas_pro` abonelik ürünü ile `monthly` otomatik yenilenen base plan Google Play Console'da oluşturuldu ve etkinleştirildi
+- [x] Türkiye'de yeni aboneler için aylık fiyat KDV dahil 299,99 TL olarak kaydedildi (ticari karar: aylık 300 TL; Google Play fiyat gösterimi)
+- [ ] Türkiye dışındaki satış ülkeleri/bölgeleri ve yerel fiyatlar kesinleştirilmeli; mevcut 174 bölge kapsamı bu fiyat değişikliğinde değiştirilmedi
+- [ ] Varsa 199,99 TL eski fiyattaki mevcut aboneler için fiyat geçişi ayrıca planlanmalı; Google Play yeni fiyatı otomatik olarak yalnız yeni abonelere uygular
 - [ ] Dahili test hesabı ayrıca License Tester listesine eklenmeli
 - [ ] Kaynaktaki Google Play RTDN / Pub/Sub alıcısı, mesaj tekrar önleme, reconcile worker ve yaşam döngüsü v2 migration/Edge işlevleri üretime dağıtılmalı; zamanlayıcı, Pub/Sub kimlik doğrulaması ve secret'lar doğrulanmalı
 - [ ] `supabase/GOOGLE_PLAY_LIFECYCLE_SETUP.md` sırasıyla uygulanmalı: yedi Edge secret'ı tanımlanmalı, Pub/Sub push OIDC audience/e-posta/tam subscription yolu doğrulanmalı ve secret'lar repo dışında tutulmalı
