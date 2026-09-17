@@ -1,0 +1,69 @@
+name: Stokdaş Security Bootstrap
+
+on:
+  push:
+    branches:
+      - fix/full-audit-20260911
+    paths:
+      - package.json
+      - .github/workflows/security-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  lock-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out security branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: fix/full-audit-20260911
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Regenerate dependency lock
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Record production dependency audit
+        run: npm audit --omit=dev || true
+
+      - name: Verify application and Edge Function types
+        run: npm run typecheck
+
+      - name: Verify strict TypeScript hygiene
+        run: npm run typecheck:strict
+
+      - name: Run contract tests
+        run: npm test
+
+      - name: Verify Expo dependencies
+        run: npx expo install --check
+
+      - name: Export Android bundle
+        run: npm run export:android
+
+      - name: Commit regenerated lockfile
+        run: |
+          set -euo pipefail
+          git add package-lock.json
+          if git diff --cached --quiet; then
+            echo "package-lock.json is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Güvenli oturum depolaması kilit dosyasını güncelle"
+          git push origin HEAD:fix/full-audit-20260911

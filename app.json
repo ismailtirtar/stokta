@@ -9,7 +9,6 @@
     "userInterfaceStyle": "light",
     "backgroundColor": "#172820",
     "primaryColor": "#172820",
-    "scheme": "stokta",
     "newArchEnabled": true,
     "android": {
       "package": "com.ismailtirtar.stokta",
@@ -37,6 +36,12 @@
       }
     },
     "plugins": [
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true
+        }
+      ],
       "expo-iap",
       [
         "expo-splash-screen",
