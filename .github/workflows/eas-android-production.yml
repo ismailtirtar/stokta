@@ -99,7 +99,7 @@ jobs:
 
   build:
     name: Build signed Android App Bundle
-    if: github.event_name != 'pull_request'
+    if: ${{ github.event_name != 'pull_request' && (github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip-android-build]')) }}
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 90
