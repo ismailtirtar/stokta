@@ -7,6 +7,7 @@
     "start": "expo start",
     "android": "expo start --android",
     "test": "node --test tests/*.test.mjs",
+    "audit:production": "node scripts/verify-npm-audit.mjs",
     "typecheck": "npm run typecheck:app && npm run typecheck:edge",
     "typecheck:app": "tsc --noEmit",
     "typecheck:strict": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
