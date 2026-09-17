@@ -6,6 +6,7 @@ on:
       - fix/full-audit-20260911
     paths:
       - package.json
+      - src/lib/secure-auth-storage.ts
       - .github/workflows/security-bootstrap.yml
 
 permissions:
