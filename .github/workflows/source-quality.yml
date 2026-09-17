@@ -1,0 +1,55 @@
+name: Stokdaş Mobile Source Quality
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: stokdas-mobile-source-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, security, test and bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify production dependency audit
+        run: npm run audit:production
+
+      - name: Verify application types
+        run: npm run typecheck
+
+      - name: Verify strict TypeScript hygiene
+        run: npm run typecheck:strict
+
+      - name: Run contract tests
+        run: npm test
+
+      - name: Verify Expo dependencies
+        run: npx expo install --check
+
+      - name: Export the Android bundle
+        run: npm run export:android

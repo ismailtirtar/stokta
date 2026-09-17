@@ -1,0 +1,18 @@
+{
+  "expiresOn": "2026-12-31",
+  "reason": "Expo SDK 54'ün Metro derleme zincirindeki image-size ayrıştırıcı açıklarıdır. Stokdaş çalışma zamanında bu paketi kullanmaz; kırıcı Expo yükseltmesi ayrı uyumluluk çalışmasıyla yapılacaktır.",
+  "allowedPackages": [
+    "image-size",
+    "metro",
+    "metro-config",
+    "metro-transform-worker",
+    "@expo/metro",
+    "@expo/metro-config",
+    "@expo/cli",
+    "expo"
+  ],
+  "allowedAdvisories": [
+    "https://github.com/advisories/GHSA-w3rx-r6r6-pgpr",
+    "https://github.com/advisories/GHSA-5p2g-fcmc-qvqq"
+  ]
+}
