@@ -31,6 +31,7 @@ Karakter sayısı: 71 / 80.
 > • Uygulama içinden yeni işletme hesabı oluşturma  
 > • Yönetici kontrollü çalışan hesapları  
 > • Kullanıcı adı ve şifreyle güvenli giriş  
+> • İşletme yöneticisi için Google Play aboneliği ve geri yükleme<br>
 > • Reklamsız ve sade kullanım
 >
 > Yeni müşteriler uygulama içinden işletmelerini ve ilk yönetici hesaplarını oluşturabilir. Yönetici ürünleri ve çalışan hesaplarını ekler. Çalışanlar kendilerine verilen kullanıcı adı ve şifreyle giriş yaparak aynı stok üzerinde çalışır. Stok hareketleri eş zamanlı güncellenir ve negatif stok engellenir.
@@ -51,8 +52,8 @@ Uygulama giriş gerektirir. Play Console > Uygulama içeriği > Uygulama erişim
 
 - Geliştirici adı: `İsmail Tırtar`
 - Destek e-postası: `tirtarismail@gmail.com`
-- Gizlilik politikası URL'si: `https://stokdas.tirtarhan.chatgpt.site/gizlilik`
-- Hesap silme web URL'si: `https://stokdas.tirtarhan.chatgpt.site/gizlilik#hesap-silme`
+- Gizlilik politikası URL'si: `https://stokdas.com/gizlilik`
+- Hesap silme web URL'si: `https://stokdas.com/gizlilik#hesap-ve-veri-silme`
 
 ## Görsel dosyalar
 

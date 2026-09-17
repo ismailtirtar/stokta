@@ -155,14 +155,14 @@ export default function AccountModal({
                 <Text style={styles.warningTitle}>Kalıcı silme işlemi</Text>
                 <Text style={styles.warningText}>
                   {isAdmin
-                    ? "İşletme yöneticisi hesabı silindiğinde yalnızca bu işletmenin ürünleri, stok hareketleri ve çalışan hesapları kalıcı olarak silinir. Diğer işletmeler etkilenmez."
-                    : "Adınız, kullanıcı adınız ve giriş hesabınız kalıcı olarak silinir. Ortak stok geçmişinin tutarlılığı için eski hareketleriniz yalnızca “Silinmiş kullanıcı” adıyla anonim olarak kalır."}
+                    ? "Bu işlem yalnızca yönettiğiniz işletmenin aktif çalışma alanını, ürünlerini, ekip erişimlerini ve kişisel hesabınızı kaldırır; diğer işletmeler etkilenmez. Dolandırıcılığı önleme, yasal yükümlülükler ve Google Play yenilemesini güvenle sonlandırma için gerekli sınırlı teknik kayıtlar Gizlilik Politikası'ndaki sürelerle tutulabilir."
+                    : "Kişisel profiliniz ve giriş erişiminiz kaldırılır. Ortak stok geçmişinin tutarlılığı için geçmiş hareketlerde adınız yerine “Silinmiş kullanıcı” gösterilebilir; güvenlik ve yasal yükümlülükler için gerekli sınırlı kayıtlar Gizlilik Politikası'ndaki sürelerle tutulabilir."}
                 </Text>
               </View>
               {needsGooglePlayCancellation ? <View style={styles.billingWarningBox}>
-                <Text style={styles.billingWarningTitle}>Önce Google Play yenilemesini kapatın</Text>
+                <Text style={styles.billingWarningTitle}>Google Play yenilemesini de kontrol edin</Text>
                 <Text style={styles.billingWarningText}>
-                  İşletmeyi veya yönetici hesabını silmek Google Play aboneliğini otomatik olarak iptal etmez. Etkin bir Google Play aboneliğiniz varsa önce otomatik yenilemeyi Google Play'de iptal edin; sonra Stokdaş'ta satın alımları geri yükleyerek durumun güncellendiğini doğrulayın. Aksi hâlde ücret alınmaya devam edebilir.
+                  Silme sırasında Stokdaş, bilinen abonelik için Google Play'e yenilemeyi durdurma talebi gönderir; bağlantı veya mağaza yanıtı doğrulanamazsa silme tamamlanmaz ve size hata gösterilir. Yine de aboneliğin Google hesabınızdaki durumunu görmek ve gerekirse iptal etmek için Google Play Abonelikler bölümünü kontrol edin.
                 </Text>
                 <Pressable
                   style={styles.billingWarningButton}
@@ -199,7 +199,7 @@ export default function AccountModal({
                 editable={!saving}
               />
               <Pressable style={[styles.deleteButton, !canDelete && styles.disabled]} onPress={() => onDelete(confirmation.trim(), currentPassword)} disabled={!canDelete}>
-                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.deleteButtonText}>{isAdmin ? "Her şeyi kalıcı olarak sil" : "Hesabımı kalıcı olarak sil"}</Text>}
+                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.deleteButtonText}>{isAdmin ? "İşletme silme işlemini başlat" : "Hesap silme işlemini başlat"}</Text>}
               </Pressable>
             </ScrollView>
           ) : null}
@@ -212,13 +212,13 @@ export default function AccountModal({
 function PrivacyPolicy() {
   return (
     <ScrollView style={styles.policy} showsVerticalScrollIndicator={false}>
-      <Text style={styles.policyDate}>Yürürlük tarihi: 1 Eylül 2026</Text>
+      <Text style={styles.policyDate}>Yürürlük tarihi: 11 Eylül 2026</Text>
       <PolicySection title="Veri sorumlusu">Stokdaş uygulaması İsmail Tırtar tarafından işletilir. Hizmet, kiracı işletmelerin stok ve kullanıcı verilerini birbirinden ayrılmış çalışma alanlarında yönetmesini sağlar.</PolicySection>
-      <PolicySection title="İşlenen veriler">İşletme adı; kullanıcı adı, ad ve soyad, doğrulanmış kurtarma e-postası, hesap rolü, oturum ve güvenlik kayıtları; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kullanım koşullarının sürümü ve kabul zamanı da kaydedilir. Google Play aboneliğinde ürün ve plan, abonelik durumu ve dönemi doğrulanıp saklanır; satın alma belirteci ile sipariş referansının yalnızca geri döndürülemez özetleri erişim doğrulaması, dolandırıcılığın önlenmesi ve muhasebe kayıtları için tutulur. Kart ve ödeme yöntemi bilgileri Stokdaş'a aktarılmaz. Bir içerik veya kullanıcı bildirildiğinde hedef kayıt, neden, isteğe bağlı açıklama, bildiren hesap, zaman ve yöneticinin moderasyon işlemi tutulur. Kötüye kullanımı sınırlandırmak için ağ adresinin geri döndürülemeyen özeti güvenlik kontrollerinde kullanılabilir. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</PolicySection>
+      <PolicySection title="İşlenen veriler">İşletme adı; kullanıcı adı, ad ve soyad, doğrulanmış kurtarma e-postası, hesap rolü, oturum ve güvenlik kayıtları; ürünler, stok miktarları, işlem notları ve işlemi yapan kullanıcı kaydı işlenir. Kullanım koşullarının sürümü ve kabul zamanı da kaydedilir. Google Play aboneliğinde ürün ve plan, abonelik durumu ve dönemi doğrulanıp saklanır. Satın alma belirteci yenileme, geri ödeme ve silme işlemlerini güvenle sonuçlandırmak için sınırlı süreyle şifreli olarak; belirteç ve sipariş referanslarının geri döndürülemez özetleri ise erişim doğrulaması, dolandırıcılığın önlenmesi ve kayıt bütünlüğü için tutulabilir. Kart ve ödeme yöntemi bilgileri Stokdaş'a aktarılmaz. Bir içerik veya kullanıcı bildirildiğinde hedef kayıt, neden, isteğe bağlı açıklama, bildiren hesap, zaman ve yöneticinin moderasyon işlemi tutulur. Kötüye kullanımı sınırlandırmak için ağ adresinin geri döndürülemeyen özeti güvenlik kontrollerinde kullanılabilir. Şifreler Supabase Auth tarafından güvenli biçimde yönetilir ve uygulama tarafından düz metin olarak saklanmaz.</PolicySection>
       <PolicySection title="Amaç ve paylaşım">Veriler yalnızca kimlik doğrulama, e-posta doğrulama, hesap kurtarma, işletme hesabı açma, ortak stok takibi, abonelik ve ödeme doğrulaması, yetkilendirme, güvenlik, içerik moderasyonu ve işlem geçmişi amaçlarıyla kullanılır. İşletme içindeki içerik ve çalışan bildirimleri yalnızca o işletmenin yöneticilerine; işletme yöneticileri hakkındaki bildirimler ise yalnızca yetkili platform operatörlerine gösterilir. Abonelik işlemi ve doğrulaması için gerekli bilgiler Google Play ile paylaşılır; ödeme Google Play tarafından yürütülür. Reklam, veri satışı veya kullanıcı takibi yapılmaz. Altyapı sağlayıcısı olarak Supabase kullanılır; veriler Frankfurt bölgesindeki sunucularda tutulur.</PolicySection>
-      <PolicySection title="Saklama ve silme">Veriler hesap veya işletme çalışma alanı silinene kadar saklanır. Moderasyon bildirimleri, kararların tutarlılığı ve kötüye kullanımın önlenmesi için hedef içerik kaldırıldıktan veya bildirim çözüldükten sonra da işletme çalışma alanı silinene kadar saklanabilir. Çalışan hesabı silindiğinde profil bilgileri kaldırılır ve eski hareketler anonimleştirilir. İşletme yöneticisi silme işlemini başlattığında yalnızca kendi işletmesinin verileri ve hesapları kalıcı olarak kaldırılır.</PolicySection>
+      <PolicySection title="Saklama ve silme">Aktif çalışma alanı verileri hesap veya işletme silme işlemi tamamlanana kadar saklanır. Çalışan hesabı silindiğinde profil erişimi kaldırılır ve eski hareketler anonimleştirilir. İşletme silindiğinde aktif ürün, hareket, ekip ve profil verileri kaldırılır. Güvenlik, uyuşmazlık, dolandırıcılığı önleme veya yasal yükümlülükler için gerekli sınırlı kayıtlar amaçlarıyla orantılı süre boyunca tutulabilir. Silme sonrasında yenilemeyi durdurmak veya geri ödemeyi doğrulamak için gereken şifreli Google Play belirteci en fazla 30 gün daha ve hiçbir durumda ilk kaydından itibaren 120 günden uzun tutulmaz; işlem tamamlandığında daha erken silinir. Yedek kopyalar olağan güvenli yedek döngüsü içinde üzerine yazılır.</PolicySection>
       <PolicySection title="Güvenlik">Aktarım sırasında HTTPS kullanılır. Her kayıt işletme kimliğiyle ayrılır; veritabanında satır düzeyi güvenlik ve rol tabanlı yetkilendirme uygulanır. Bir işletme diğer işletmenin ürün, hareket veya kullanıcı verilerini okuyamaz. Hizmet rolü anahtarı mobil uygulamaya eklenmez.</PolicySection>
-      <PolicySection title="Haklarınız">Hesabınızı bu ekrandaki “Hesabımı sil” seçeneğiyle silebilirsiniz. İşletme yöneticisi yalnızca kendi işletmesinin çalışma alanını kaldırabilir. Platform yöneticisi hesabı güvenlik nedeniyle uygulama içinden silinemez. Gizlilik ve veri talepleri için tirtarismail@gmail.com adresine ulaşabilirsiniz.</PolicySection>
+      <PolicySection title="Haklarınız">Hesabınızı bu ekrandaki “Hesabımı sil” seçeneğiyle silebilirsiniz. İşletme yöneticisi yalnızca kendi işletmesinin çalışma alanını kaldırabilir. Silme işlemi sunucuda tamamlanmadan uygulama başarı mesajı göstermez. Platform yöneticisi hesabı güvenlik nedeniyle uygulama içinden silinemez. Gizlilik ve veri talepleri için tirtarismail@gmail.com adresine ulaşabilirsiniz.</PolicySection>
       <View style={styles.policyBottom} />
     </ScrollView>
   );

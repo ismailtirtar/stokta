@@ -16,12 +16,12 @@
     h1 { margin: 28px 0 8px; font-size: clamp(30px, 7vw, 46px); line-height: 1.12; }
     header p { margin: 0; color: #aabbb2; }
     main { padding: 34px 20px 60px; }
-    section { margin: 0 0 16px; padding: 24px; border: 1px solid #e0e4df; border-radius: 16px; background: #fff; }
-    h2 { margin: 0 0 10px; font-size: 20px; }
-    h3 { margin: 20px 0 6px; font-size: 15px; }
-    p, li { color: #5f6b64; }
-    a { color: #1f7353; font-weight: 700; }
-    .notice { border-color: #ecd9be; background: #fffaf2; }
+    .document-card { padding: 24px; border: 1px solid #e0e4df; border-radius: 16px; background: #fff; }
+    .subscription-card { margin-top: 16px; padding: 24px; border: 1px solid #efd5ad; border-radius: 16px; background: #fff9ef; }
+    .subscription-card h2 { margin: 0 0 10px; font-size: 20px; }
+    .subscription-card p, .subscription-card li { color: #665a49; }
+    .terms-document { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: #5f6b64; font: inherit; }
+    .digest { margin: 14px 0 0; color: #7f8b84; font-size: 12px; overflow-wrap: anywhere; }
     footer { padding: 24px 20px; text-align: center; color: #7f8b84; background: #e9ece7; font-size: 13px; }
   </style>
 </head>
@@ -30,50 +30,44 @@
     <div>
       <div class="brand"><span class="mark">S</span> Stokdaş</div>
       <h1>Kullanım Koşulları</h1>
-      <p>Sürüm: 2026-08-29-v1 · Yürürlük tarihi: 29 Ağustos 2026</p>
+      <p>Sürüm: 2026-09-11-v2 · Yürürlük tarihi: 11 Eylül 2026</p>
     </div>
   </header>
   <main>
-    <section>
-      <h2>Koşulların kabulü</h2>
-      <p>Kayıt sırasında onay kutusunu işaretleyip kaydı tamamladığınızda veya uygulamadaki zorunlu koşullar ekranında <strong>Okudum ve kabul ediyorum</strong> düğmesine dokunduğunuzda bu koşulları açıkça kabul etmiş olursunuz. Kabul edilen koşul sürümü ve kabul zamanı hesabınızda kaydedilir. Ürün, kategori, ürün kodu, birim ve stok hareketi notu gibi içerikleri oluşturmadan veya değiştirmeden önce güncel sürümü kabul etmeniz gerekir. Kabul etmiyorsanız stok alanını kullanamazsınız; hesabınızdan çıkış yapabilirsiniz.</p>
-      <p>Stokdaş, işletmelerin aynı çalışma alanındaki üyeleriyle stok bilgisini paylaşmasına yarar. Her çalışma alanı diğer işletmelerden ayrıdır. Çalışma alanı yöneticisi, üyelerinin yetkilerinden ve uygulamaya eklenen içeriğin iş amaçlı kullanımından sorumludur.</p>
-    </section>
-    <section>
-      <h2>Hizmetin doğru kullanımı</h2>
-      <p>Hesap bilgilerinizi koruyun; kullanıcı adınızı, şifrenizi veya doğrulama kodunuzu başkalarıyla paylaşmayın. Yalnızca yetkili olduğunuz işletme verilerini girin. Yanlış stok kaydı veya hatalı bilgi fark ederseniz, işletme yöneticinize bildirin ya da uygulama içindeki içerik bildirme yolunu kullanın.</p>
-    </section>
-    <section class="notice">
-      <h2>İçerik kuralları</h2>
-      <p>Stokdaş'a eklediğiniz veya çalışma alanınızdaki diğer üyelerle paylaştığınız içerik doğru, işle ilgili, gerekli ve paylaşmaya yetkili olduğunuz bilgi olmalıdır. Aşağıdaki içerik ve davranışlar yasaktır:</p>
+    <div class="document-card">
+      <pre class="terms-document" id="terms-canonical-text">
+1. Kapsam
+Stokdaş, aynı işletmedeki doğrulanmış kullanıcıların ürün adı, ürün kodu, kategori, birim ve stok hareketi notu gibi içerikleri ortak çalışma alanında paylaşmasını sağlar. Bu içerikler yalnızca bağlı işletmenin yetkili kullanıcılarına gösterilir.
+
+2. Yasak içerikler
+Yasa dışı; cinsel veya çocukların istismarıyla ilişkili; şiddeti teşvik eden; tehdit, nefret, ayrımcılık, taciz ya da zorbalık içeren içerikler yasaktır. Başkasının kişisel verisini veya mahremiyetini ihlal eden, fikrî mülkiyet hakkını çiğneyen, dolandırıcılık ya da kimliğe bürünme amacı taşıyan, yanıltıcı, spam, izinsiz reklam, zararlı bağlantı veya kötü amaçlı yazılım niteliğindeki içerikler de yüklenemez.
+
+3. Yasak davranışlar
+Diğer kullanıcıları taciz etmek, stok kayıtlarını zarar verme amacıyla değiştirmek, yetkisiz hesaba veya işletme verisine erişmeye çalışmak, güvenlik önlemlerini aşmak, hesabı başkasına kullandırmak ve bildirim sistemini kötü niyetle kullanmak yasaktır. Her kullanıcı kendi hesabıyla yapılan işlemlerden sorumludur.
+
+4. Bildirim ve moderasyon
+Uygulamadaki “Bildir” seçenekleriyle ürünleri, stok hareketlerini ve hareketi yapan kullanıcıyı yetkili inceleme kuyruğuna bildirebilirsiniz. Bildirim; hedef kaydı, bildirim nedenini, isteğe bağlı açıklamayı, bildiren hesabı ve işlem zamanını içerir. Çalışan hesabıyla ilişkili içerikler işletme yöneticisinin inceleme kuyruğuna gider; yönetici ürünü kaldırabilir, hareket notunu gizleyebilir, bildirilen çalışan hesabını devre dışı bırakabilir veya bildirimi işlem gerektirmediği gerekçesiyle kapatabilir. İşletme yöneticisi ya da platform yöneticisi hesabıyla ilişkili içerikler, çıkar çatışmasını önlemek için yalnız yetkili Stokdaş platform inceleme kuyruğuna yönlendirilir. Platform incelemesi ürünü kaldırabilir, hareket notunu gizleyebilir, ilgili işletmeyi idari olarak askıya alabilir veya bildirimi işlem gerektirmediği gerekçesiyle kapatabilir.
+
+5. Yaptırımlar
+Yasak içeriğin kaldırılması, görünürlüğünün sınırlandırılması, hesap veya işletme erişiminin askıya alınması ya da sona erdirilmesi mümkündür. Ciddi veya tekrarlanan ihlaller platform güvenliği kapsamında ayrıca incelenebilir ve hukuken gerekli hâllerde yetkili mercilerle iş birliği yapılabilir. Kötü niyetli ve tekrarlanan asılsız bildirimler de hesap kısıtlamasına yol açabilir.
+
+6. Koşulların güncellenmesi
+Güvenlik, mevzuat veya hizmet değişiklikleri nedeniyle koşullar güncellenebilir. Yeni bir sürüm yayımlandığında stok alanını kullanmaya devam etmeden önce yeniden kabulünüz istenir. Gizlilik ve veri işleme ayrıntıları Hesabım bölümündeki Gizlilik Politikası’nda açıklanır.
+
+İletişim: tirtarismail@gmail.com
+</pre>
+      <p class="digest">Belge SHA-256: 062c24aec9fcfb9a2eda5ede2c7c0e833b40b4c80ff0c35cde46f7ed3f9560fe</p>
+    </div>
+    <section class="subscription-card" aria-labelledby="google-play-subscription-terms">
+      <h2 id="google-play-subscription-terms">Google Play abonelik koşulları</h2>
+      <p>Bu bölüm, yukarıdaki değişmez topluluk/UGC belgesinden ayrıdır ve belge SHA-256 özetine dahil değildir.</p>
       <ul>
-        <li>pornografik, müstehcen veya cinsel içerik; çocukların cinsel istismarı ya da sömürüsüne ilişkin her türlü içerik;</li>
-        <li>nefret söylemi, ayrımcılık, tehdit, şiddet çağrısı, aşırı şiddet, taciz, zorbalık veya bir kişiyi hedef alan aşağılayıcı içerik;</li>
-        <li>hukuka aykırı faaliyet, ürün veya hizmet; suça teşvik eden ya da suçun nasıl işleneceğini anlatan içerik;</li>
-        <li>dolandırıcılık, aldatma, kimliğe bürünme, yanıltıcı kayıt, spam veya izinsiz reklam;</li>
-        <li>başkasının kişisel verisini, özel iletişim bilgisini veya hassas bilgisini izinsiz açıklama; takip, ifşa veya mahremiyet ihlali;</li>
-        <li>telif, marka, ticari sır veya başka bir fikrî mülkiyet hakkını ihlal eden içerik;</li>
-        <li>zararlı yazılım, kimlik avı, kötü amaçlı kod ya da güvenliği tehlikeye atan bağlantı;</li>
-        <li>stok kayıtlarını zarar verme amacıyla değiştirme, yetkisiz hesaba veya işletme verisine erişmeye çalışma, güvenlik önlemlerini aşma ya da hesabı başkasına kullandırma.</li>
+        <li>Stokdaş Pro işletme çalışma alanı için aylık, otomatik yenilenen bir Google Play aboneliğidir. Güncel fiyat, vergi ve para birimi satın alma onayından önce Google Play ekranında gösterilir.</li>
+        <li>Yeni işletmelerin 14 günlük uygulama içi denemesi Google Play ücretsiz denemesi değildir. Deneme sürerken abonelik başlatılırsa Google Play ücreti hemen alabilir ve ücretli dönem başlar.</li>
+        <li>Abonelik, dönem bitmeden Google Play hesabındaki Ödemeler ve abonelikler bölümünden iptal edilmedikçe otomatik yenilenir. Uygulamayı veya Stokdaş hesabını silmek, Google Play'deki abonelik durumunu ayrıca kontrol etme sorumluluğunu ortadan kaldırmaz.</li>
+        <li>İptal, geri ödeme, ödeme bekleme, grace/hold ve erişim kararları Google Play'in geçerli kurallarına ve doğrulanmış mağaza durumuna göre uygulanır. Stokdaş kart numarası veya ödeme yöntemi bilgisi almaz.</li>
+        <li>Hesap/işletme silinirken bilinen yenilemeyi durdurma denenir; Google Play yanıtı doğrulanamazsa işlem başarıyla tamamlanmış sayılmaz. Satın alma verilerinin sınırlı saklanması Gizlilik Politikası'nda açıklanır.</li>
       </ul>
-      <p>Bu kurallara aykırı içerik girmeyin. İçerik, yalnızca ilgili çalışma alanındaki yetkili kullanıcılar tarafından görülebilir; herkese açık bir sosyal ağ gönderisi değildir.</p>
-    </section>
-    <section>
-      <h2>İçerik veya kullanıcı bildirme</h2>
-      <p>Bir ürün, stok hareketi notu veya hareketi yapan kullanıcı bu kuralları ihlal ediyorsa ilgili kayıttaki <strong>Bildir</strong>, <strong>İçeriği bildir</strong> veya <strong>Kullanıcıyı bildir</strong> seçeneğini kullanarak nedenini seçebilir ve en fazla 1000 karakterlik isteğe bağlı açıklama ekleyebilirsiniz. Bildirim, yalnızca aynı işletmenin etkin hedefi için oluşturulur ve işletme yöneticileri tarafından incelenir. İşletme yöneticisi veya platform yöneticisi hakkındaki bildirimler destek adresine iletilmelidir. Acil tehlike veya hukuka aykırı durumlarda yerel yetkili mercilere başvurun.</p>
-      <p>Bildirim oluşturulduğunda sunucu, hedef kaydı doğrular ve bildirilen ürün alanlarının, stok hareketi notunun veya kullanıcı görünen bilgisinin en fazla 1000 karakterlik bir kanıt kopyasını doğrudan kayıtlı veriden üretir. Bildiren kişi bu kanıt kopyasını belirleyemez veya değiştiremez. Kanıt kopyası, bildirimin daha sonra incelenebilmesi için hedef içerik kaldırılmış ya da gizlenmiş olsa da bildirim kaydında tutulabilir; erişim yalnızca yetkili inceleme akışıyla sınırlandırılır.</p>
-      <p>Bildirim aracı dürüstçe kullanılmalıdır. Kasıtlı olarak asılsız veya kötü niyetli bildirim yapılması da bu koşulların ihlalidir.</p>
-    </section>
-    <section>
-      <h2>İnceleme ve yaptırım</h2>
-      <p>İşletme yöneticisi bir bildirimi işlem gerektirmediği gerekçesiyle kapatabilir, kurala aykırı ürünü etkin stok listesinden kaldırabilir, stok hareketi notunu <strong>[Moderasyon tarafından kaldırıldı]</strong> metniyle değiştirebilir veya ihlal eden çalışan hesabını devre dışı bırakıp açık oturumlarını sonlandırabilir. Ürün kaldırıldığında geçmiş stok hareketleri; not gizlendiğinde hareketin miktarı, önceki/yeni stok değeri ve zamanı kayıt bütünlüğü için korunur. Yönetici kendi hakkındaki bildirimi çözemez ve başka bir işletmenin kayıtlarına erişemez.</p>
-      <p>Gerekli olduğunda Stokdaş hizmetin güvenliğini korumak için içeriği kaldırabilir, hesap ya da çalışma alanı erişimini geçici veya kalıcı olarak sınırlandırabilir ve ciddi veya tekrarlanan ihlalleri ayrıca inceleyebilir. Hukuken gerekli olduğunda yetkili mercilerle iş birliği yapılabilir.</p>
-      <p>Bildirim, sunucu tarafından üretilen kanıt kopyası ve uygulanan işlem inceleme ve güvenlik amacıyla kayıt altına alınır. Saklama ve hesap silme sırasında anonimleştirme ayrıntıları için <a href="/gizlilik">Gizlilik Politikası</a>'na bakın.</p>
-    </section>
-    <section>
-      <h2>Değişiklikler ve iletişim</h2>
-      <p>Bu koşullar değişirse sürüm ve yürürlük tarihi güncellenir. İçerik oluşturma kurallarını önemli ölçüde etkileyen yeni sürümü uygulamada yeniden kabul etmeniz istenebilir.</p>
-      <p>Sorularınız için: <a href="mailto:tirtarismail@gmail.com">tirtarismail@gmail.com</a></p>
     </section>
   </main>
   <footer>© 2026 Stokdaş · İsmail Tırtar</footer>

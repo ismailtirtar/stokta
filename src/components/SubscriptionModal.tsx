@@ -17,9 +17,15 @@ import type { ProductSubscription, Purchase } from "expo-iap";
 import {
   billingOpaqueId,
   ANDROID_PACKAGE_NAME,
+  clearGooglePlayPurchaseIntent,
+  isGooglePlayPurchaseIntent,
   PLAY_SUBSCRIPTION_BASE_PLAN_ID,
   PLAY_SUBSCRIPTION_PRODUCT_ID,
+  readGooglePlayPurchaseIntent,
+  saveGooglePlayPurchaseIntent,
 } from "../lib/billing";
+import type { GooglePlayPurchaseIntent } from "../lib/billing";
+import { withOperationTimeout } from "../lib/auth-retry";
 import { supabase } from "../lib/supabase";
 
 type Props = {
@@ -34,14 +40,27 @@ type Props = {
 };
 
 type VerificationResponse = {
-  store?: string;
-  entitled?: boolean;
-  acknowledged?: boolean;
-  subscriptionStatus?: string;
-  currentPeriodEnd?: string | null;
+  store: "google";
+  entitled: boolean;
+  acknowledged: boolean;
+  disposition: string;
+  intentConsumed: boolean;
+  intentClosed: boolean;
+  subscriptionStatus: string;
+  currentPeriodEnd: string | null;
 };
 
 type ScreenState = "idle" | "launching" | "verifying" | "restoring" | "pending" | "success";
+
+class PurchaseVerificationError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "PurchaseVerificationError";
+    this.code = code;
+  }
+}
 
 const PURCHASE_REVERIFY_TTL_MS = 30_000;
 const AUTOMATIC_RECONCILE_TTL_MS = 60_000;
@@ -87,13 +106,28 @@ function NativeSubscriptionModal({
   const [nativeUnavailable, setNativeUnavailable] = useState(Platform.OS !== "android");
   const [productLoading, setProductLoading] = useState(false);
   const purchaseHandlerRef = useRef<((purchase: Purchase) => Promise<void>) | null>(null);
+  const purchaseQueueRef = useRef<Promise<void>>(Promise.resolve());
   const recentlyProcessedPurchaseHashesRef = useRef(new Map<string, number>());
   const processingPurchaseHashesRef = useRef(new Set<string>());
   const lastAutomaticReconciliationRef = useRef(0);
+  const purchaseIntentRef = useRef<GooglePlayPurchaseIntent | null>(null);
+  const consumedPurchaseIntentIdsRef = useRef(new Set<string>());
+  const purchaseLaunchWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const purchaseLaunchInFlightRef = useRef(false);
+  const restoreInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
   const onSubscriptionUpdatedRef = useRef(onSubscriptionUpdated);
   onSubscriptionUpdatedRef.current = onSubscriptionUpdated;
 
+  const clearPurchaseLaunchWatchdog = useCallback(() => {
+    if (purchaseLaunchWatchdogRef.current) clearTimeout(purchaseLaunchWatchdogRef.current);
+    purchaseLaunchWatchdogRef.current = null;
+  }, []);
+
   const handleIapError = useCallback((iapError: { code?: string; message?: string }) => {
+    if (!mountedRef.current) return;
+    clearPurchaseLaunchWatchdog();
+    purchaseLaunchInFlightRef.current = false;
     setScreenState("idle");
     setError("");
     if (iapError.code === "user-cancelled" || /user.*cancel|cancelled by user/i.test(iapError.message ?? "")) {
@@ -108,7 +142,7 @@ function NativeSubscriptionModal({
       return;
     }
     setError(friendlyBillingError(message));
-  }, []);
+  }, [clearPurchaseLaunchWatchdog]);
 
   const {
     connected,
@@ -116,7 +150,6 @@ function NativeSubscriptionModal({
     availablePurchases,
     fetchProducts,
     requestPurchase,
-    finishTransaction,
     getAvailablePurchases,
     restorePurchases,
     reconnect,
@@ -134,7 +167,11 @@ function NativeSubscriptionModal({
     setProductLoading(true);
     setError("");
     try {
-      await fetchProducts({ skus: [PLAY_SUBSCRIPTION_PRODUCT_ID], type: "subs" });
+      await withOperationTimeout(
+        fetchProducts({ skus: [PLAY_SUBSCRIPTION_PRODUCT_ID], type: "subs" }),
+        15_000,
+        "Google Play ürün bilgisi zaman aşımına uğradı",
+      );
     } catch (fetchError) {
       setError(friendlyBillingError(errorMessage(fetchError)));
     } finally {
@@ -152,8 +189,42 @@ function NativeSubscriptionModal({
     return phases.at(-1)?.formattedPrice ?? playSubscription?.displayPrice ?? "";
   }, [basePlanOffer, playSubscription]);
 
+  const pendingPurchaseIntent = useCallback(async () => {
+    const current = purchaseIntentRef.current;
+    if (current && Date.parse(current.expiresAt) > Date.now()
+      && !consumedPurchaseIntentIdsRef.current.has(current.purchaseIntentId)) return current;
+    const stored = await readGooglePlayPurchaseIntent(userId, organizationId);
+    if (stored && consumedPurchaseIntentIdsRef.current.has(stored.purchaseIntentId)) {
+      void clearGooglePlayPurchaseIntent(userId, organizationId).catch(() => undefined);
+      return null;
+    }
+    purchaseIntentRef.current = stored;
+    return stored;
+  }, [organizationId, userId]);
+
+  const beginPurchaseIntent = useCallback(async () => {
+    const { data, error: intentError } = await withOperationTimeout(
+      supabase.functions.invoke(
+        "verify-play-subscription",
+        { body: { action: "begin", productId: PLAY_SUBSCRIPTION_PRODUCT_ID } },
+      ),
+      20_000,
+      "Satın alma hazırlığı zaman aşımına uğradı",
+    );
+    if (intentError) throw new Error(await edgeFunctionMessage(intentError));
+    if (!isGooglePlayPurchaseIntent(data) || Date.parse(data.expiresAt) <= Date.now()) {
+      throw new Error("Satın alma hazırlığı doğrulanamadı. Lütfen yeniden deneyin.");
+    }
+    await saveGooglePlayPurchaseIntent(userId, organizationId, data);
+    purchaseIntentRef.current = data;
+    return data;
+  }, [organizationId, userId]);
+
   const processPurchase = useCallback(async (purchase: Purchase) => {
+    if (!mountedRef.current) return;
     if (purchase.productId !== PLAY_SUBSCRIPTION_PRODUCT_ID || purchase.store !== "google") return;
+    clearPurchaseLaunchWatchdog();
+    purchaseLaunchInFlightRef.current = false;
     const googlePurchase = purchase as Purchase & {
       isAcknowledgedAndroid?: boolean | null;
       isSuspendedAndroid?: boolean | null;
@@ -188,11 +259,36 @@ function NativeSubscriptionModal({
     setStoreMessage("Satın alma Google Play ile doğrulanıyor…");
 
     try {
-      const { data, error: verificationError } = await supabase.functions.invoke<VerificationResponse>(
-        "verify-play-subscription",
-        { body: { purchaseToken, productId: PLAY_SUBSCRIPTION_PRODUCT_ID } },
-      );
-      if (verificationError) throw new Error(await edgeFunctionMessage(verificationError));
+      let intent = await pendingPurchaseIntent();
+      let verification = await invokePurchaseVerification(purchaseToken, intent);
+      if (verification.error) {
+        const failure = await edgeFunctionFailure(verification.error);
+        if (failure.code !== "INVALID_INTENT" || !intent) {
+          throw new PurchaseVerificationError(failure.message, failure.code);
+        }
+
+        // Sunucu eski/kapalı intent'i açıkça reddettiğinde tokenı restore gibi
+        // bağlamaya çalışmak yerine yeni kimlik bağlı intent ile aynı isteği yineleriz.
+        purchaseIntentRef.current = null;
+        await clearGooglePlayPurchaseIntent(userId, organizationId).catch(() => undefined);
+        intent = await beginPurchaseIntent();
+        verification = await invokePurchaseVerification(purchaseToken, intent);
+        if (verification.error) {
+          const retryFailure = await edgeFunctionFailure(verification.error);
+          throw new PurchaseVerificationError(retryFailure.message, retryFailure.code);
+        }
+      }
+      const data = verification.data;
+      if (!isVerificationResponse(data)) {
+        throw new PurchaseVerificationError("Satın alma sunucu yanıtı doğrulanamadı.");
+      }
+      if (!mountedRef.current) return;
+
+      if (intent && (data.intentConsumed || data.intentClosed)) {
+        consumedPurchaseIntentIdsRef.current.add(intent.purchaseIntentId);
+        purchaseIntentRef.current = null;
+        void clearGooglePlayPurchaseIntent(userId, organizationId).catch(() => undefined);
+      }
 
       const processedAt = Date.now();
       recentlyProcessedPurchaseHashesRef.current.set(purchaseHash, processedAt);
@@ -202,7 +298,7 @@ function NativeSubscriptionModal({
         }
       }, PURCHASE_REVERIFY_TTL_MS);
 
-      if (data?.store === "google" && data.subscriptionStatus === "suspended") {
+      if (data.subscriptionStatus === "suspended") {
         setScreenState("pending");
         setError("");
         setStoreMessage("İşletme erişimi platform güvenlik kararıyla askıya alınmış. Google Play aboneliğini doğrulamak veya geri yüklemek bu kısıtlamayı kaldırmaz; destek için Stokdaş ile iletişime geçin.");
@@ -210,7 +306,7 @@ function NativeSubscriptionModal({
         return;
       }
 
-      if (!data?.entitled || data.store !== "google") {
+      if (!data.entitled) {
         setScreenState("pending");
         setStoreMessage(googlePurchase.isSuspendedAndroid
           ? "Google Play aboneliği ödeme sorunu nedeniyle askıda. Ödeme yönteminizi Google Play'de güncelleyin; ardından satın alımları geri yükleyin."
@@ -218,21 +314,35 @@ function NativeSubscriptionModal({
         return;
       }
 
-      if (!data.acknowledged && !googlePurchase.isAcknowledgedAndroid) {
-        await finishTransaction({ purchase, isConsumable: false });
+      if (data.acknowledged !== true) {
+        setScreenState("pending");
+        setStoreMessage("Ödeme doğrulandı ancak Google Play onayı henüz tamamlanmadı. Yeniden satın almayın; biraz sonra satın alımları geri yükleyin.");
+        return;
       }
       setScreenState("success");
       setStoreMessage("Abonelik doğrulandı ve işletme erişimi güncellendi.");
       await onSubscriptionUpdatedRef.current();
     } catch (verificationFailure) {
+      if (!mountedRef.current) return;
       setScreenState("idle");
-      setError(friendlyBillingError(errorMessage(verificationFailure)));
+      const verificationCode = (verificationFailure as { code?: string })?.code;
+      const retryAdvice = verificationCode === "OWNERSHIP_CONFLICT"
+        ? "Bu satın alma başka bir Stokdaş hesabına bağlı görünüyor; doğru işletme hesabıyla giriş yaptığınızı kontrol edin."
+        : "Ücret alındıysa yeniden satın almayın; “Satın alımları geri yükle” ile aynı doğrulamayı güvenle yineleyin.";
+      setError(`${friendlyBillingError(errorMessage(verificationFailure))} ${retryAdvice}`);
       setStoreMessage("");
     } finally {
       processingPurchaseHashesRef.current.delete(purchaseHash);
     }
-  }, [finishTransaction]);
-  purchaseHandlerRef.current = processPurchase;
+  }, [beginPurchaseIntent, clearPurchaseLaunchWatchdog, organizationId, pendingPurchaseIntent, userId]);
+  const enqueuePurchase = useCallback((purchase: Purchase) => {
+    const queued = purchaseQueueRef.current
+      .catch(() => undefined)
+      .then(() => processPurchase(purchase));
+    purchaseQueueRef.current = queued.catch(() => undefined);
+    return queued;
+  }, [processPurchase]);
+  purchaseHandlerRef.current = enqueuePurchase;
 
   const reconcileAvailablePurchases = useCallback(async (showError: boolean) => {
     if (!connected || Platform.OS !== "android") return;
@@ -240,7 +350,11 @@ function NativeSubscriptionModal({
     if (now - lastAutomaticReconciliationRef.current < AUTOMATIC_RECONCILE_TTL_MS) return;
     lastAutomaticReconciliationRef.current = now;
     try {
-      await getAvailablePurchases({ includeSuspendedAndroid: true });
+      await withOperationTimeout(
+        getAvailablePurchases({ includeSuspendedAndroid: true }),
+        25_000,
+        "Google Play satın alımları zaman aşımına uğradı",
+      );
     } catch (restoreError) {
       if (showError) handleIapError({ message: errorMessage(restoreError) });
     }
@@ -264,33 +378,65 @@ function NativeSubscriptionModal({
 
   useEffect(() => {
     for (const purchase of availablePurchases) {
-      if (purchase.productId === PLAY_SUBSCRIPTION_PRODUCT_ID && purchase.store === "google") void processPurchase(purchase);
+      if (purchase.productId === PLAY_SUBSCRIPTION_PRODUCT_ID && purchase.store === "google") void enqueuePurchase(purchase);
     }
-  }, [availablePurchases, processPurchase]);
+  }, [availablePurchases, enqueuePurchase]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      purchaseLaunchInFlightRef.current = false;
+      restoreInFlightRef.current = false;
+      clearPurchaseLaunchWatchdog();
+    };
+  }, [clearPurchaseLaunchWatchdog]);
 
   async function startPurchase() {
-    if (Platform.OS !== "android" || nativeUnavailable) return;
+    if (Platform.OS !== "android" || nativeUnavailable
+      || purchaseLaunchInFlightRef.current || restoreInFlightRef.current) return;
+    purchaseLaunchInFlightRef.current = true;
     if (!connected) {
       setError("");
-      const reconnected = await reconnect();
+      let reconnected = false;
+      try {
+        reconnected = await withOperationTimeout(
+          reconnect(),
+          15_000,
+          "Google Play bağlantısı zaman aşımına uğradı",
+        );
+      } catch (connectionError) {
+        handleIapError(iapErrorShape(connectionError));
+        return;
+      }
       if (!reconnected) {
+        purchaseLaunchInFlightRef.current = false;
         setError("Google Play'e bağlanılamadı. İnternet bağlantınızı ve Play Store oturumunuzu kontrol edin.");
         return;
       }
     }
     if (!basePlanOffer?.offerTokenAndroid) {
+      purchaseLaunchInFlightRef.current = false;
       setError("Aylık abonelik şu anda Google Play'de kullanılamıyor. Lütfen biraz sonra yeniden deneyin.");
       return;
     }
 
     setScreenState("launching");
     setError("");
-    setStoreMessage("Google Play ödeme ekranı açılıyor…");
+    setStoreMessage("Satın alma güvenli biçimde hazırlanıyor…");
+    clearPurchaseLaunchWatchdog();
+    purchaseLaunchWatchdogRef.current = setTimeout(() => {
+      purchaseLaunchWatchdogRef.current = null;
+      purchaseLaunchInFlightRef.current = false;
+      if (!mountedRef.current) return;
+      setScreenState("idle");
+      setError("Google Play sonucu uygulamaya ulaşmadı. Ücret alındıysa yeniden satın almayın; satın alımları geri yükleyin.");
+      setStoreMessage("");
+    }, 100_000);
     try {
-      const [obfuscatedAccountId, obfuscatedProfileId] = await Promise.all([
-        billingOpaqueId(userId),
-        billingOpaqueId(organizationId),
-      ]);
+      const intent = await beginPurchaseIntent();
+      if (!mountedRef.current) return;
+      setStoreMessage("Google Play ödeme ekranı açılıyor…");
       await requestPurchase({
         type: "subs",
         request: {
@@ -300,8 +446,8 @@ function NativeSubscriptionModal({
               sku: PLAY_SUBSCRIPTION_PRODUCT_ID,
               offerToken: basePlanOffer.offerTokenAndroid,
             }],
-            obfuscatedAccountId,
-            obfuscatedProfileId,
+            obfuscatedAccountId: intent.obfuscatedAccountId,
+            obfuscatedProfileId: intent.obfuscatedProfileId,
             isOfferPersonalized: false,
           },
         },
@@ -312,19 +458,28 @@ function NativeSubscriptionModal({
   }
 
   async function restore() {
-    if (nativeUnavailable || Platform.OS !== "android") return;
+    if (nativeUnavailable || Platform.OS !== "android"
+      || restoreInFlightRef.current || purchaseLaunchInFlightRef.current) return;
+    restoreInFlightRef.current = true;
+    clearPurchaseLaunchWatchdog();
     recentlyProcessedPurchaseHashesRef.current.clear();
     setScreenState("restoring");
     setError("");
     setStoreMessage("Google Play satın alımları kontrol ediliyor…");
     try {
-      await restorePurchases({ includeSuspendedAndroid: true });
+      await withOperationTimeout(
+        restorePurchases({ includeSuspendedAndroid: true }),
+        40_000,
+        "Google Play geri yükleme işlemi zaman aşımına uğradı",
+      );
       setScreenState("idle");
       setStoreMessage("Satın alma kayıtları kontrol edildi.");
     } catch (restoreError) {
       setScreenState("idle");
       setError(friendlyBillingError(errorMessage(restoreError)));
       setStoreMessage("");
+    } finally {
+      restoreInFlightRef.current = false;
     }
   }
 
@@ -338,7 +493,11 @@ function NativeSubscriptionModal({
     setProductLoading(true);
     setError("");
     try {
-      const reconnected = await reconnect();
+      const reconnected = await withOperationTimeout(
+        reconnect(),
+        15_000,
+        "Google Play bağlantısı zaman aşımına uğradı",
+      );
       if (!reconnected) {
         setError("Google Play'e bağlanılamadı. İnternet bağlantınızı ve Play Store oturumunuzu kontrol edip yeniden deneyin.");
         return;
@@ -519,12 +678,53 @@ function iapErrorShape(value: unknown) {
 }
 
 async function edgeFunctionMessage(error: unknown) {
+  return (await edgeFunctionFailure(error)).message;
+}
+
+async function edgeFunctionFailure(error: unknown) {
   const candidate = error as { context?: Response; message?: string };
   try {
-    const body = await candidate.context?.json() as { error?: string } | undefined;
-    if (body?.error) return body.error;
+    const body = await candidate.context?.json() as { error?: string; code?: string } | undefined;
+    if (body?.error) return { message: body.error, code: body.code };
   } catch { /* Güvenli istemci mesajına dönülür. */ }
-  return candidate.message ?? "Satın alma sunucuda doğrulanamadı.";
+  return { message: candidate.message ?? "Satın alma sunucuda doğrulanamadı.", code: undefined };
+}
+
+function isVerificationResponse(value: unknown): value is VerificationResponse {
+  if (!value || typeof value !== "object") return false;
+  const response = value as Partial<VerificationResponse>;
+  const periodIsValid = response.currentPeriodEnd === null
+    || (typeof response.currentPeriodEnd === "string" && Number.isFinite(Date.parse(response.currentPeriodEnd)));
+  return response.store === "google"
+    && typeof response.entitled === "boolean"
+    && typeof response.acknowledged === "boolean"
+    && typeof response.disposition === "string"
+    && response.disposition.length > 0
+    && typeof response.intentConsumed === "boolean"
+    && typeof response.intentClosed === "boolean"
+    && typeof response.subscriptionStatus === "string"
+    && ["trial", "active", "past_due", "suspended", "canceled"].includes(response.subscriptionStatus)
+    && periodIsValid;
+}
+
+async function invokePurchaseVerification(purchaseToken: string, intent: GooglePlayPurchaseIntent | null) {
+  return withOperationTimeout(
+    supabase.functions.invoke<VerificationResponse>(
+      "verify-play-subscription",
+      { body: intent ? {
+        action: "verify",
+        purchaseToken,
+        purchaseIntentId: intent.purchaseIntentId,
+        productId: PLAY_SUBSCRIPTION_PRODUCT_ID,
+      } : {
+        action: "restore",
+        purchaseToken,
+        productId: PLAY_SUBSCRIPTION_PRODUCT_ID,
+      } },
+    ),
+    70_000,
+    "Google Play doğrulaması zaman aşımına uğradı",
+  );
 }
 
 function friendlyBillingError(message: string) {

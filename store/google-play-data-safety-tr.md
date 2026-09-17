@@ -1,6 +1,6 @@
 # Stokdaş — Google Play Veri Güvenliği beyanı
 
-Bu belge, Stokdaş 1.3.3 (12) kaynak kodu ve uygulanan sunucu veri akışına göre Play Console Veri Güvenliği formunda kullanılacak kesin yanıtları içerir.
+Bu belge, Stokdaş 1.3.4 güncel kaynak adayı ile eşleşen sunucu veri akışına göre Play Console Veri Güvenliği formunda kullanılacak yanıtları içerir. Bu aday için yeni AAB ve mağaza beyanı henüz yayımlanmış sayılmaz; gönderimden önce üretilen AAB ile yeniden doğrulanmalıdır.
 
 ## Genel yanıtlar
 
@@ -10,7 +10,7 @@ Bu belge, Stokdaş 1.3.3 (12) kaynak kodu ve uygulanan sunucu veri akışına g�
 - Kullanıcı veri silme talebinde bulunabilir mi? `Evet`
 - Uygulama hesap oluşturmayı destekliyor mu? `Evet — kullanıcı kendi işletmesini ve ilk yönetici hesabını, işletme yöneticisi çalışan hesaplarını oluşturur`
 - Uygulama içinde hesap silme var mı? `Evet — Hesabım > Hesabımı sil`
-- Uygulama dışında hesap silme kaynağı var mı? `Evet — https://stokdas.tirtarhan.chatgpt.site/gizlilik#hesap-silme`
+- Uygulama dışında hesap silme kaynağı var mı? `Evet — https://stokdas.com/gizlilik#hesap-ve-veri-silme`
 
 Supabase, geliştirici adına altyapı hizmeti veren veri işleyen/hizmet sağlayıcıdır. Hizmet sağlayıcıya aktarım, Google Play tanımına göre “paylaşım” olarak işaretlenmez; veri yine de “toplanan” olarak beyan edilir.
 
@@ -68,7 +68,16 @@ Supabase, geliştirici adına altyapı hizmeti veren veri işleyen/hizmet sağla
 - Geçici işleme: `Hayır`
 - Zorunlu: `Uygulama kullanıldığında gerekli`
 - Amaç: `Uygulama işlevselliği`, `Dolandırıcılığı önleme, güvenlik ve uygunluk`
-- Açıklama: Stok ekleme/düşme türü, miktarı, önceki/yeni stok ve işlem zamanı ekip senkronizasyonu ve geçmiş için tutulur. Kabul edilen kullanım koşulları sürümü ve kabul zamanı; içerik bildiriminin oluşturulma zamanı, inceleme durumu, inceleyen yöneticinin görünen adı, isteğe bağlı moderasyon notu ve uygulanan işlem; uygulama işlevselliği, hesap yönetimi, güvenlik ve uygunluk amacıyla tutulur.
+- Açıklama: Stok ekleme/düşme türü, miktarı, önceki/yeni stok ve işlem zamanı ekip senkronizasyonu ve geçmiş için tutulur. Kabul edilen kullanım koşulları sürümü, belge özeti ve kabul zamanı; içerik bildiriminin oluşturulma zamanı, yetkili inceleme kapsamı, inceleme durumu, inceleyen yöneticinin görünen adı, moderasyon gerekçesi ve uygulanan işlem; uygulama işlevselliği, hesap yönetimi, güvenlik ve uygunluk amacıyla tutulur. Çalışanla ilişkili bildirimler işletme yöneticisine, işletme yöneticisi veya platform yöneticisiyle ilişkili bildirimler yetkili Stokdaş platform kuyruğuna yönlendirilir.
+
+### Finansal bilgiler > Satın alma geçmişi
+
+- Toplanan: `Evet`
+- Paylaşılan: `Hayır`
+- Geçici işleme: `Hayır`
+- Zorunlu: `Hayır — ücretli abonelik başlatılır veya geri yüklenirse`
+- Amaç: `Uygulama işlevselliği`, `Hesap yönetimi`, `Dolandırıcılığı önleme, güvenlik ve uygunluk`
+- Açıklama: Google Play abonelik ürünü/base planı, satın alma ve yenileme durumu, dönem/sona erme bilgisi, satın alma belirteci ve sipariş referansı abonelik hakkını vermek, yenileme/iptal/geri ödeme olaylarını eşitlemek ve aynı satın almanın başka hesaba bağlanmasını önlemek için işlenir. Ham satın alma belirteci yalnız sunucu tarafında şifreli saklanır; istemci kart numarası veya ödeme yöntemi bilgisi almaz. Google Play bu akışta mağaza ve ödeme hizmeti sağlayıcısıdır.
 
 ### Cihaz veya diğer kimlikler
 
@@ -81,7 +90,7 @@ Supabase, geliştirici adına altyapı hizmeti veren veri işleyen/hizmet sağla
 
 ## Toplanmayan veri türleri
 
-Konum, telefon, adres, finans, sağlık, mesajlar, fotoğraf/video/ses, dosya, takvim, kişiler, web geçmişi, yüklü uygulamalar, reklam kimliği, analiz, çökme kaydı ve tanılama verisi uygulama kodu tarafından toplanmaz. Reklam veya analiz SDK'sı yoktur.
+Konum, telefon, fiziksel adres, ödeme bilgileri (kart numarası/banka hesabı), sağlık, mesajlar, fotoğraf/video/ses, dosya, takvim, kişiler, web geçmişi, yüklü uygulamalar, reklam kimliği, analiz, çökme kaydı ve tanılama verisi uygulama kodu tarafından toplanmaz. Google Play satın alma geçmişi ise yukarıdaki ayrı veri türünde toplanır. Reklam veya analiz SDK'sı yoktur.
 
 ## Silme davranışı
 
@@ -90,6 +99,7 @@ Konum, telefon, adres, finans, sağlık, mesajlar, fotoğraf/video/ses, dosya, t
 - Çalışanın bildirim geçmişi: Silinen çalışan bildiren ise bildiren kimliği boşaltılır, adı “Silinmiş kullanıcı” olur ve yazdığı serbest açıklama silinir. Çalışan bildirilen kullanıcı ise hedef kimliği boşaltılır, hedef etiketi ile kullanıcı kanıt kopyası “Silinmiş kullanıcı” olur. Çalışan moderatör ise çözen kimliği boşaltılır, görünen adı “Silinmiş kullanıcı” olur ve moderasyon notu silinir. Bildirimin neden, durum ve işlem kaydı işletme silinene kadar korunur.
 - İçerik bildirimi saklama: Bildirim nedeni, açıklaması, hedef etiketi, sunucunun ürettiği içerik kanıt kopyası, durum ve moderasyon işlemi ilgili işletme çalışma alanı var olduğu sürece saklanır. Hedef ürün veya hareket kaldırılmış olsa bile kanıt kopyası bildirim geçmişinde kalır.
 - İşletme yöneticisi silme: Bağlı işletmenin ürünleri, stok hareketleri, kullanıcı hesapları, içerik bildirimleri, bildirim açıklamaları ve sunucu tarafından üretilen kanıt kopyaları kalıcı olarak silinir; diğer kiracı işletmeler etkilenmez.
+- Google Play kayıtları: Silme işlemi bilinen otomatik yenilenen aboneliğin yenilenmesini Google Play üzerinden durdurmayı dener ve mağaza yanıtı doğrulanmadan başarılı sayılmaz. Yenilemeyi durdurma, iptal/geri ödeme bildirimi ve silinen satın almanın yeniden bağlanmasını önleme için gereken şifreli satın alma belirteci silme sonrasında en fazla 30 gün daha ve hiçbir durumda ilk saklandığı tarihten itibaren 120 günden uzun tutulmaz; iş tamamlanırsa daha erken silinir. Geri döndürülemez belirteç, sipariş ve silinen kimlik özetleri en fazla 120 gün tutulabilir.
 - Güvenlik denetim olayları: Olay türü, dahili kayıt kimlikleri, hedef türü, neden/işlem ve zaman gibi teknik güvenlik kayıtları kullanıcı veya işletme silindikten sonra da saklanabilir ve otomatik süre sonuna tabi değildir. Bunlar ham kullanıcı içeriği, bildirim kanıt kopyası, bildiren açıklaması veya moderasyon notu içermez. Silinen kullanıcı/işletmeye bağlı doğrudan kimlik ilişkileri boşaltılır; kullanıcı hedef kimliği ilgili denetim olayından çıkarılır. Bu kayıtlara yalnızca sunucu hizmet rolü erişebilir.
 
 Google Play, üçüncü taraf SDK'ların işlediği veriler dahil tüm geliştirici beyanlarının doğru olmasını ister. Kaynak: [Veri Güvenliği formu](https://support.google.com/googleplay/android-developer/answer/10787469?hl=en).
