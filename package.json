@@ -6,7 +6,10 @@
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
+    "test": "node --test tests/*.test.mjs",
+    "audit:production": "node scripts/verify-npm-audit.mjs",
     "typecheck": "tsc --noEmit",
+    "typecheck:strict": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
     "export:android": "expo export --platform android",
     "build:apk": "eas build --platform android --profile preview",
     "build:play": "eas build --platform android --profile production"
@@ -17,6 +20,7 @@
     "expo": "~54.0.0",
     "expo-crypto": "~15.0.9",
     "expo-iap": "5.5.0",
+    "expo-secure-store": "~15.0.8",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.8",
     "expo-system-ui": "~6.0.9",
@@ -28,5 +32,9 @@
   "devDependencies": {
     "@types/react": "~19.1.10",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "uuid": "11.1.1",
+    "postcss": "8.5.28"
   }
 }
