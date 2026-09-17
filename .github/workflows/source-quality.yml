@@ -15,24 +15,27 @@ permissions:
 
 jobs:
   verify:
-    name: Typecheck, test and bundle
+    name: Typecheck, security, test and bundle
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify production dependency audit
+        run: npm run audit:production
 
       - name: Verify application and Edge Function types
         run: npm run typecheck
