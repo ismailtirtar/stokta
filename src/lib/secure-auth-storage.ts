@@ -171,7 +171,7 @@ async function writeSecureValue(key: string, value: string) {
     for (let index = 0; index < chunks.length; index += 1) {
       await SecureStore.setItemAsync(
         chunkKey(scope, generation, index),
-        chunks[index],
+        chunks[index]!,
         secureStoreOptions,
       );
       writtenChunks += 1;
