@@ -1,3 +1,4 @@
+# Retry 2: edits.commit performs validation; the separate validate endpoint is omitted.
 name: Stokdaş Google Play One-Time Submit
 
 on:
