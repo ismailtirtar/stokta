@@ -5,7 +5,6 @@ on:
     branches:
       - main
     paths:
-      - .github/google-play-submit-request.json
       - .github/workflows/google-play-submit-once.yml
 
 concurrency:
@@ -14,190 +13,92 @@ concurrency:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   submit:
     name: Submit verified AAB to Google Play internal testing
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 5
     env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      FUNCTION_URL: https://wewqrnpwqvnjusehxxtz.supabase.co/functions/v1/google-play-submit-once
+      OIDC_AUDIENCE: stokdas-google-play-submit-v22
 
     steps:
-      - name: Require Expo authentication
-        run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "::error::EXPO_TOKEN is not configured; Google Play submission cannot run."
-            exit 1
-          fi
-
-      - name: Check out main
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Validate one-time request
-        id: request
+      - name: Request GitHub OIDC identity
+        id: oidc
+        shell: bash
         run: |
           set -euo pipefail
-          REQUEST_FILE=".github/google-play-submit-request.json"
-          BUILD_ID="$(jq -er '.buildId' "$REQUEST_FILE")"
-          EXPECTED_GIT_COMMIT="$(jq -er '.gitCommitHash' "$REQUEST_FILE")"
-          EXPECTED_VERSION="$(jq -er '.appVersion' "$REQUEST_FILE")"
-          EXPECTED_VERSION_CODE="$(jq -er '.appBuildVersion' "$REQUEST_FILE")"
-          EXPECTED_APPLICATION_ID="$(jq -er '.appIdentifier' "$REQUEST_FILE")"
-          EXPECTED_PROJECT_ID="$(jq -er '.easProjectId' "$REQUEST_FILE")"
-          REQUESTED_TRACK="$(jq -er '.track' "$REQUEST_FILE")"
-          CONFIGURED_APPLICATION_ID="$(jq -er '.submit.production.android.applicationId' eas.json)"
-          CONFIGURED_TRACK="$(jq -er '.submit.production.android.track' eas.json)"
+          OIDC_RESPONSE="$(curl --fail --silent --show-error \
+            --connect-timeout 15 --max-time 30 \
+            --header "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${OIDC_AUDIENCE}")"
+          OIDC_TOKEN="$(jq -er '.value' <<<"$OIDC_RESPONSE")"
+          echo "::add-mask::$OIDC_TOKEN"
+          echo "token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
 
-          if ! [[ "$BUILD_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
-            echo "::error::The requested EAS build ID is not a UUID."
-            exit 1
-          fi
-          if ! [[ "$EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::The expected source commit is invalid."
-            exit 1
-          fi
-          if ! [[ "$EXPECTED_VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::The requested Android version code is invalid."
-            exit 1
-          fi
-          if [ "$REQUESTED_TRACK" != "internal" ] || [ "$CONFIGURED_TRACK" != "internal" ]; then
-            echo "::error::This one-time workflow may submit only to the Google Play internal track."
-            exit 1
-          fi
-          if [ "$EXPECTED_APPLICATION_ID" != "$CONFIGURED_APPLICATION_ID" ]; then
-            echo "::error::The request application ID does not match eas.json."
-            exit 1
-          fi
-          if [ "$BUILD_ID" != "b6a28673-fd6f-454b-b874-3cf0ade3f568" ] \
-            || [ "$EXPECTED_GIT_COMMIT" != "14d935c8e7bb15bd92233d15985dc930c1e7f07d" ] \
-            || [ "$EXPECTED_VERSION" != "1.3.4" ] \
-            || [ "$EXPECTED_VERSION_CODE" != "22" ] \
-            || [ "$EXPECTED_APPLICATION_ID" != "com.ismailtirtar.stokta" ] \
-            || [ "$EXPECTED_PROJECT_ID" != "6d9c0250-c796-4458-9fdb-99e50b690c3b" ]; then
-            echo "::error::The one-time request differs from the verified Stokdaş 1.3.4 (22) release."
-            exit 1
-          fi
-
-          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
-          echo "git_commit=$EXPECTED_GIT_COMMIT" >> "$GITHUB_OUTPUT"
-          echo "version=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
-          echo "version_code=$EXPECTED_VERSION_CODE" >> "$GITHUB_OUTPUT"
-          echo "application_id=$EXPECTED_APPLICATION_ID" >> "$GITHUB_OUTPUT"
-          echo "project_id=$EXPECTED_PROJECT_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Set up EAS CLI
-        uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
-        with:
-          eas-version: 23.0.0
-          packager: npm
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Verify EAS build provenance
+      - name: Invoke locked Google Play submit
         env:
-          BUILD_ID: ${{ steps.request.outputs.build_id }}
-          EXPECTED_APPLICATION_ID: ${{ steps.request.outputs.application_id }}
-          EXPECTED_GIT_COMMIT: ${{ steps.request.outputs.git_commit }}
-          EXPECTED_PROJECT_ID: ${{ steps.request.outputs.project_id }}
-          EXPECTED_VERSION: ${{ steps.request.outputs.version }}
-          EXPECTED_VERSION_CODE: ${{ steps.request.outputs.version_code }}
+          OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          eas build:view "$BUILD_ID" --json > eas-build.json
+          mkdir -p submission-artifacts
 
-          STATUS="$(jq -r '.status // empty' eas-build.json)"
-          PLATFORM="$(jq -r '.platform // empty' eas-build.json)"
-          VERSION="$(jq -r '.appVersion // empty' eas-build.json)"
-          VERSION_CODE="$(jq -r '.appBuildVersion // empty' eas-build.json)"
-          APPLICATION_ID="$(jq -r '.appIdentifier // empty' eas-build.json)"
-          PROJECT_ID="$(jq -r '.app.id // empty' eas-build.json)"
-          BUILD_PROFILE="$(jq -r '.buildProfile // empty' eas-build.json)"
-          DISTRIBUTION="$(jq -r '.distribution // empty' eas-build.json)"
-          GIT_COMMIT="$(jq -r '.gitCommitHash // empty' eas-build.json)"
+          jq -n \
+            --arg build_id "b6a28673-fd6f-454b-b874-3cf0ade3f568" \
+            --arg git_commit "14d935c8e7bb15bd92233d15985dc930c1e7f07d" \
+            --arg version "1.3.4" \
+            --arg version_code "22" \
+            --arg package_name "com.ismailtirtar.stokta" \
+            --arg track "internal" \
+            '{buildId: $build_id, gitCommitHash: $git_commit, appVersion: $version, appBuildVersion: $version_code, packageName: $package_name, track: $track}' \
+            > submission-artifacts/request-provenance.json
 
-          if [ "$STATUS" != "FINISHED" ] || [ "$PLATFORM" != "ANDROID" ]; then
-            echo "::error::Build is not a finished Android build (status=$STATUS, platform=$PLATFORM)."
-            exit 1
-          fi
-          if [ "$VERSION" != "$EXPECTED_VERSION" ] || [ "$VERSION_CODE" != "$EXPECTED_VERSION_CODE" ]; then
-            echo "::error::EAS build version does not match the verified release."
-            exit 1
-          fi
-          if [ "$APPLICATION_ID" != "$EXPECTED_APPLICATION_ID" ] || [ "$PROJECT_ID" != "$EXPECTED_PROJECT_ID" ]; then
-            echo "::error::EAS build identity does not match Stokdaş."
-            exit 1
-          fi
-          if [ "$BUILD_PROFILE" != "production" ] || [ "$DISTRIBUTION" != "STORE" ]; then
-            echo "::error::EAS build is not a production store build."
-            exit 1
-          fi
-          if [ "$GIT_COMMIT" != "$EXPECTED_GIT_COMMIT" ]; then
-            echo "::error::EAS build source commit does not match the verified release commit."
-            exit 1
-          fi
-
-      - name: Submit to Google Play internal testing
-        id: submit
-        env:
-          BUILD_ID: ${{ steps.request.outputs.build_id }}
-        run: |
-          set -uo pipefail
           set +e
-          eas submit --platform android --profile production --id "$BUILD_ID" \
-            --non-interactive --wait --verbose 2>&1 | tee eas-submit.log
-          SUBMIT_STATUS="${PIPESTATUS[0]}"
+          HTTP_STATUS="$(curl --silent --show-error --location \
+            --connect-timeout 20 --max-time 145 \
+            --output submission-artifacts/response.json \
+            --write-out '%{http_code}' \
+            --request POST "$FUNCTION_URL" \
+            --header "Authorization: Bearer $OIDC_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data '{"confirm":"submit-stokdas-1.3.4-22-internal"}')"
+          CURL_STATUS="$?"
           set -e
 
-          if [ "$SUBMIT_STATUS" -ne 0 ]; then
-            if grep -Eqi 'Google Service Account Keys cannot be set up|Google Play.*service account|service account.*not (configured|found)' eas-submit.log; then
-              echo "::error::Google Play Android Publisher service account is not configured in EAS."
-            else
-              echo "::error::EAS failed to submit build $BUILD_ID to Google Play internal testing."
-            fi
-            exit "$SUBMIT_STATUS"
+          echo "httpStatus=$HTTP_STATUS" | tee submission-artifacts/http-status.txt
+          if [ -s submission-artifacts/response.json ]; then
+            jq -c . submission-artifacts/response.json || cat submission-artifacts/response.json
           fi
 
-          eas submit:list --platform android --limit 1 --json > eas-submit.json
+          if [ "$CURL_STATUS" -ne 0 ]; then
+            echo "::error::Supabase submission request failed with curl status $CURL_STATUS."
+            exit "$CURL_STATUS"
+          fi
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Supabase submission function returned HTTP $HTTP_STATUS."
+            exit 1
+          fi
 
-      - name: Record submission evidence
-        if: always()
-        env:
-          BUILD_ID: ${{ steps.request.outputs.build_id }}
-          GIT_COMMIT: ${{ steps.request.outputs.git_commit }}
-          VERSION: ${{ steps.request.outputs.version }}
-          VERSION_CODE: ${{ steps.request.outputs.version_code }}
-        run: |
-          mkdir -p submission-artifacts
-          for file in .github/google-play-submit-request.json eas-build.json eas-submit.log eas-submit.json; do
-            if [ -f "$file" ]; then
-              cp "$file" submission-artifacts/"$(basename "$file")"
-            fi
-          done
-          jq -n \
-            --arg build_id "$BUILD_ID" \
-            --arg git_commit "$GIT_COMMIT" \
-            --arg version "$VERSION" \
-            --arg version_code "$VERSION_CODE" \
-            --arg track "internal" \
-            '{buildId: $build_id, gitCommitHash: $git_commit, appVersion: $version, appBuildVersion: $version_code, track: $track}' \
-            > submission-artifacts/submission-provenance.json
+          jq -e '
+            .ok == true
+            and .packageName == "com.ismailtirtar.stokta"
+            and .track == "internal"
+            and .appVersion == "1.3.4"
+            and .versionCode == "22"
+            and .buildId == "b6a28673-fd6f-454b-b874-3cf0ade3f568"
+            and (.status == "uploaded_and_committed"
+              or .status == "assigned_and_committed"
+              or .status == "already_present")
+          ' submission-artifacts/response.json >/dev/null
 
       - name: Upload submission evidence
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
-          name: stokdas-1.3.4-22-google-play-one-time-submit
+          name: stokdas-1.3.4-22-google-play-direct-submit
           path: submission-artifacts/
           if-no-files-found: error
           retention-days: 30
