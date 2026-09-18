@@ -1,4 +1,4 @@
-# Retry 2: edits.commit performs validation; the separate validate endpoint is omitted.
+# Retry 3: preserve existing permissions and add only CAN_MANAGE_TRACK_APKS when authorized.
 name: Stokdaş Google Play One-Time Submit
 
 on:
