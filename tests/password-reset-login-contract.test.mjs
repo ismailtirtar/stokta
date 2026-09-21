@@ -11,6 +11,11 @@ const resetFunctionSource = source("supabase/functions/complete-password-reset/i
 const mobileLoginSource = source("src/screens/LoginScreen.tsx");
 const mobileSupabaseSource = source("src/lib/supabase.ts");
 
+test("registration uses a generic business name prompt", () => {
+  assert.match(mobileLoginSource, /placeholder="İşletme adını girin"/);
+  assert.doesNotMatch(mobileLoginSource, /Tırtar Market/);
+});
+
 test("verified recovery email can sign in without being rewritten as a username", () => {
   assert.match(loginFunctionSource, /identifierLooksLikeEmail = identifierValue\.includes\("@"\)/);
   assert.match(loginFunctionSource, /identifierLooksLikeEmail \? normalizeRecoveryEmail\(identifierValue\) : null/);
