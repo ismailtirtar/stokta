@@ -382,7 +382,7 @@ export default function LoginScreen() {
                 </View>
 
                 {isRegister ? <>
-                  <Field label="İşletme adı" value={organizationName} onChangeText={setOrganizationName} placeholder="Örn. Tırtar Market" autoCapitalize="words" />
+                  <Field label="İşletme adı" value={organizationName} onChangeText={setOrganizationName} placeholder="İşletme adını girin" autoCapitalize="words" />
                   <Field label="Ad ve soyad" value={displayName} onChangeText={setDisplayName} placeholder="Örn. İsmail Tırtar" autoCapitalize="words" textContentType="name" />
                   <Field label="E-posta" value={recoveryEmail} onChangeText={setRecoveryEmail} placeholder="ornek@email.com" autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress" />
                 </> : null}
