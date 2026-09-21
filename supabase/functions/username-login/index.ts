@@ -4,13 +4,14 @@ import {
   corsJsonHeaders,
   json,
   maskEmail,
+  normalizeRecoveryEmail,
   normalizeUsername,
   requestIp,
   sessionIdFromAccessToken,
   sha256,
 } from "../_shared/security.ts";
 
-const invalidCredentials = { error: "Kullanıcı adı veya şifre hatalı" };
+const invalidCredentials = { error: "Kullanıcı adı, e-posta veya şifre hatalı" };
 
 type SupabaseErrorLike = {
   code?: string;
@@ -63,13 +64,19 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json() as Record<string, unknown>;
-    const username = normalizeUsername(body.username);
+    const identifierValue = typeof body.identifier === "string"
+      ? body.identifier
+      : typeof body.username === "string"
+      ? body.username
+      : "";
+    const identifierLooksLikeEmail = identifierValue.includes("@");
+    const recoveryEmail = identifierLooksLikeEmail ? normalizeRecoveryEmail(identifierValue) : null;
+    const username = identifierLooksLikeEmail ? null : normalizeUsername(identifierValue);
     const password = typeof body.password === "string" ? body.password : "";
-    const rateUsername = username ?? "invalid";
+    const normalizedIdentifier = username ?? recoveryEmail ?? "invalid";
     const ip = requestIp(req);
-    const [identityHash, accountHash, ipHash] = await Promise.all([
-      sha256(`stokta:login:v1:${ip}:${rateUsername}:${supabaseUrl}:${serviceRoleKey}`),
-      sha256(`stokta:login-account:v1:${rateUsername}:${supabaseUrl}:${serviceRoleKey}`),
+    const [identityHash, ipHash] = await Promise.all([
+      sha256(`stokta:login:v1:${ip}:${normalizedIdentifier}:${supabaseUrl}:${serviceRoleKey}`),
       sha256(`stokta:login-ip:v1:${ip}:${supabaseUrl}:${serviceRoleKey}`),
     ]);
 
@@ -82,7 +89,6 @@ Deno.serve(async (req: Request) => {
 
     const [
       { data: identityAllowed, error: identityRateError },
-      { data: accountAllowed, error: accountRateError },
       { data: ipAllowed, error: ipRateError },
     ] =
       await Promise.all([
@@ -93,46 +99,46 @@ Deno.serve(async (req: Request) => {
           p_window_seconds: 900,
         }),
         admin.rpc("consume_auth_rate_limit", {
-          p_scope: "username-login-account",
-          p_key_hash: accountHash,
-          p_max_attempts: 12,
-          p_window_seconds: 900,
-        }),
-        admin.rpc("consume_auth_rate_limit", {
           p_scope: "username-login-ip",
           p_key_hash: ipHash,
           p_max_attempts: 60,
           p_window_seconds: 900,
         }),
       ]);
-    if (identityRateError || accountRateError || ipRateError) {
+    if (identityRateError || ipRateError) {
       console.error("Username login rate limiter unavailable", {
         identityRateError,
-        accountRateError,
         ipRateError,
       });
       return json(503, { error: "Giriş hizmeti şu anda kullanılamıyor" });
     }
-    if (!identityAllowed || !accountAllowed || !ipAllowed) {
+    if (!identityAllowed || !ipAllowed) {
       return json(429, { error: "Çok fazla giriş denemesi yapıldı. Lütfen daha sonra tekrar deneyin." });
     }
 
-    if (!username || password.length < 1 || password.length > 72) {
+    if ((!username && !recoveryEmail) || password.length < 1 || password.length > 72) {
       return json(401, invalidCredentials);
     }
 
-    const { data: profile, error: profileError } = await retryTransientSupabaseOperation(() => admin
+    let profileQuery = admin
       .from("profiles")
-      .select("id,must_change_password,recovery_email,recovery_email_verified_at")
-      .eq("username", username)
-      .eq("is_active", true)
-      .maybeSingle());
+      .select("id,username,must_change_password,recovery_email,recovery_email_verified_at")
+      .eq("is_active", true);
+    profileQuery = username
+      ? profileQuery.eq("username", username)
+      : profileQuery
+        .eq("recovery_email", recoveryEmail as string)
+        .not("recovery_email_verified_at", "is", null);
+    const { data: profile, error: profileError } = await retryTransientSupabaseOperation(() =>
+      profileQuery.maybeSingle()
+    );
     if (profileError) {
       console.error("Username lookup failed", profileError);
       return json(503, { error: "Giriş hizmeti şu anda kullanılamıyor" });
     }
-    let email: string;
-    let expectedUserId: string;
+    let email: string | null = null;
+    let expectedUserId: string | null = null;
+    let resolvedUsername = profile?.username ?? username ?? "";
     let pendingRegistrationKind: string | null = null;
     let pendingExpiresAt: string | null = null;
 
@@ -160,23 +166,46 @@ Deno.serve(async (req: Request) => {
       }
       expectedUserId = profile.id;
     } else {
-      const { data: pending, error: pendingError } = await admin
+      let pendingQuery = admin
         .from("pending_account_registrations")
-        .select("auth_user_id,registration_kind,email,expires_at")
-        .eq("username", username)
-        .maybeSingle();
+        .select("auth_user_id,registration_kind,email,expires_at,username");
+      pendingQuery = username
+        ? pendingQuery.eq("username", username)
+        : pendingQuery.eq("email", recoveryEmail as string);
+      const { data: pending, error: pendingError } = await pendingQuery.maybeSingle();
       if (pendingError) {
-        console.error("Pending username lookup failed", pendingError);
+        console.error("Pending registration lookup failed", pendingError);
         return json(503, { error: "Giriş hizmeti şu anda kullanılamıyor" });
       }
-      if (!pending || new Date(pending.expires_at).getTime() <= Date.now()) {
-        return json(401, invalidCredentials);
+      if (pending && new Date(pending.expires_at).getTime() > Date.now()) {
+        email = pending.email;
+        expectedUserId = pending.auth_user_id;
+        resolvedUsername = pending.username;
+        pendingRegistrationKind = pending.registration_kind;
+        pendingExpiresAt = pending.expires_at;
       }
-      email = pending.email;
-      expectedUserId = pending.auth_user_id;
-      pendingRegistrationKind = pending.registration_kind;
-      pendingExpiresAt = pending.expires_at;
     }
+
+    const accountHash = await sha256(
+      `stokta:login-account:v2:${expectedUserId ?? `unknown:${normalizedIdentifier}`}:${supabaseUrl}:${serviceRoleKey}`,
+    );
+    const { data: accountAllowed, error: accountRateError } = await admin.rpc(
+      "consume_auth_rate_limit",
+      {
+        p_scope: "username-login-account",
+        p_key_hash: accountHash,
+        p_max_attempts: 12,
+        p_window_seconds: 900,
+      },
+    );
+    if (accountRateError) {
+      console.error("Username login account rate limiter unavailable", accountRateError);
+      return json(503, { error: "Giriş hizmeti şu anda kullanılamıyor" });
+    }
+    if (!accountAllowed) {
+      return json(401, invalidCredentials);
+    }
+    if (!expectedUserId || !email) return json(401, invalidCredentials);
 
     const { data: signInData, error: signInError } =
       await retryTransientSupabaseOperation(() => authClient.auth.signInWithPassword({
@@ -189,7 +218,7 @@ Deno.serve(async (req: Request) => {
           error: "E-posta doğrulaması gerekli",
           code: "EMAIL_VERIFICATION_REQUIRED",
           errorCode: "EMAIL_VERIFICATION_REQUIRED",
-          username,
+          username: resolvedUsername,
           maskedEmail: maskEmail(email),
           expiresAt: pendingExpiresAt,
         });
@@ -218,7 +247,7 @@ Deno.serve(async (req: Request) => {
       }
       const { data: finalized, error: finalizeError } = await admin.rpc(
         "service_finalize_pending_registration",
-        { p_auth_user_id: expectedUserId, p_username: username },
+        { p_auth_user_id: expectedUserId, p_username: resolvedUsername },
       );
       if (finalizeError) {
         console.error("Confirmed pending login finalization failed", finalizeError);

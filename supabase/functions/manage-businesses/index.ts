@@ -41,6 +41,10 @@ Deno.serve(async (req: Request) => {
 
     const { data: userData, error: userError } = await admin.auth.getUser(token);
     if (userError || !userData.user) return json(401, { error: "Geçersiz oturum" });
+    const { data: claimsData, error: claimsError } = await admin.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims || claimsData.claims.sub !== userData.user.id) {
+      return json(401, { error: "Geçersiz oturum" });
+    }
     const sessionId = sessionIdFromAccessToken(token);
     if (!sessionId) return json(401, { error: "Geçersiz oturum" });
     const { data: liveSession, error: liveSessionError } = await admin.rpc("service_has_live_session", {
@@ -57,6 +61,42 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
     if (callerError || !caller?.is_platform_operator || caller.must_change_password) {
       return json(403, { error: "Bu işlem yalnızca Stokdaş platform yöneticisine açıktır" });
+    }
+    const hasVerifiedTotp = userData.user.factors?.some((factor) =>
+      factor.factor_type === "totp" && factor.status === "verified"
+    ) ?? false;
+    if (!hasVerifiedTotp) {
+      return json(403, {
+        error: "Platform yönetimi için doğrulanmış bir TOTP faktörü gerekli",
+        code: "MFA_ENROLLMENT_REQUIRED",
+      });
+    }
+    if (claimsData.claims.aal !== "aal2") {
+      return json(403, {
+        error: "Platform yönetimi için iki adımlı doğrulama gerekli",
+        code: "MFA_REQUIRED",
+      });
+    }
+    const hasTotpAmr = Array.isArray(claimsData.claims.amr)
+      && claimsData.claims.amr.some((entry) => {
+        const method = typeof entry === "string" ? entry : entry?.method;
+        return method === "totp" || method === "mfa/totp";
+      });
+    if (!hasTotpAmr) {
+      return json(403, {
+        error: "Bu oturum TOTP ile doğrulanmalıdır",
+        code: "TOTP_VERIFICATION_REQUIRED",
+      });
+    }
+    const { data: liveTotpSession, error: liveTotpSessionError } = await admin.rpc(
+      "service_has_live_totp_aal2_session",
+      { p_user_id: userData.user.id, p_session_id: sessionId },
+    );
+    if (liveTotpSessionError || !liveTotpSession) {
+      return json(403, {
+        error: "TOTP ile doğrulanmış canlı AAL2 oturumu gerekli",
+        code: "TOTP_SESSION_REQUIRED",
+      });
     }
 
     if (req.method === "GET") {
@@ -150,4 +190,3 @@ Deno.serve(async (req: Request) => {
     return json(500, { error: "İşletme yönetimi işlemi tamamlanamadı" });
   }
 });
-

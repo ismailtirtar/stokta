@@ -11,6 +11,7 @@ import { retryTransientSupabaseOperation } from "../lib/auth-retry";
 import AccountModal from "../components/AccountModal";
 import ContentReportModal from "../components/ContentReportModal";
 import ForcedPasswordChange from "../components/ForcedPasswordChange";
+import PlatformMfaGate from "../components/PlatformMfaGate";
 import PlatformModal from "../components/PlatformModal";
 import SafetyCenterModal from "../components/SafetyCenterModal";
 import SubscriptionModal from "../components/SubscriptionModal";
@@ -40,6 +41,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
   const [isPlatformOperator, setIsPlatformOperator] = useState(false);
+  const [platformMfaVerifiedToken, setPlatformMfaVerifiedToken] = useState<string | null>(null);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [termsChecked, setTermsChecked] = useState(false);
   const [serverTermsVersion, setServerTermsVersion] = useState<string | null>(null);
@@ -75,6 +77,10 @@ export default function InventoryScreen({ session }: { session: Session }) {
   const [coworkerPassword, setCoworkerPassword] = useState("");
   const [coworkerPasswordAgain, setCoworkerPasswordAgain] = useState("");
   const [saving, setSaving] = useState(false);
+  const handlePlatformMfaVerified = useCallback(
+    () => setPlatformMfaVerifiedToken(session.access_token),
+    [session.access_token],
+  );
 
   const loadData = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -393,6 +399,15 @@ export default function InventoryScreen({ session }: { session: Session }) {
   }
 
   if (mustChangePassword) return <ForcedPasswordChange />;
+  if (isPlatformOperator && platformMfaVerifiedToken !== session.access_token) {
+    return (
+      <PlatformMfaGate
+        visible
+        onVerified={handlePlatformMfaVerified}
+        onSignOut={signOut}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>

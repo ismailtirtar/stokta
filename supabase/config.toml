@@ -1,3 +1,7 @@
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
 [functions.bootstrap-admin]
 verify_jwt = false
 
