@@ -32,6 +32,14 @@ export function normalizeUsername(username: string) {
     .replace(/[^a-z0-9._-]/g, "");
 }
 
+export function normalizeLoginIdentifier(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed.includes("@")) return normalizeUsername(trimmed);
+
+  const email = trimmed.toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
+}
+
 export function usernameToInternalEmail(username: string) {
   const normalized = normalizeUsername(username);
   return normalized ? `${normalized}@stokta.invalid` : "";

@@ -84,7 +84,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: profile, error: profileError } = await admin
       .from("profiles")
-      .select("id")
+      .select("id,username,recovery_email,recovery_email_verified_at")
       .eq("id", claim.userId)
       .eq("organization_id", claim.organizationId)
       .eq("is_active", true)
@@ -124,6 +124,35 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    const identifiers = [
+      profile.username,
+      profile.recovery_email_verified_at ? profile.recovery_email : null,
+    ].filter((value): value is string => Boolean(value));
+    const identityHashes = await Promise.all(
+      identifiers.map((identifier) =>
+        sha256(`stokta:login:v1:${ip}:${identifier}:${supabaseUrl}:${serviceRoleKey}`)
+      ),
+    );
+    const accountHash = await sha256(
+      `stokta:login-account:v2:${claim.userId}:${supabaseUrl}:${serviceRoleKey}`,
+    );
+    const clearResults = await Promise.all([
+      ...identityHashes.map((identityHash) =>
+        admin.rpc("clear_auth_rate_limit", {
+          p_scope: "username-login",
+          p_key_hash: identityHash,
+        })
+      ),
+      admin.rpc("clear_auth_rate_limit", {
+        p_scope: "username-login-account",
+        p_key_hash: accountHash,
+      }),
+    ]);
+    const accountLocksCleared = clearResults.every((result) => !result.error);
+    if (!accountLocksCleared) {
+      console.error("Password reset login rate-limit cleanup failed");
+    }
+
     await admin.rpc("service_record_security_event", {
       p_event_type: "password.reset_completed",
       p_organization_id: claim.organizationId,
@@ -131,7 +160,12 @@ Deno.serve(async (req: Request) => {
       p_ip_hash: ipHash,
     });
 
-    return json(200, { updated: true, reauthenticationRequired: true });
+    return json(200, {
+      updated: true,
+      reauthenticationRequired: true,
+      username: profile.username,
+      accountLocksCleared,
+    });
   } catch (error) {
     console.error("Password reset completion failed", error);
     return json(500, { error: "Şifre yenileme tamamlanamadı" });

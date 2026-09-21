@@ -13,7 +13,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { normalizeUsername, supabase } from "../lib/supabase";
+import { normalizeLoginIdentifier, normalizeUsername, supabase } from "../lib/supabase";
 import { retryTransientSupabaseOperation } from "../lib/auth-retry";
 import { CURRENT_UGC_TERMS_VERSION } from "../lib/ugc";
 import TermsModal from "../components/TermsModal";
@@ -99,9 +99,9 @@ export default function LoginScreen() {
   async function signIn() {
     if (signInInFlight.current) return;
 
-    const normalizedUsername = normalizeUsername(username);
-    if (!normalizedUsername || !password) {
-      setError("Kullanıcı adı ve şifre zorunludur.");
+    const normalizedIdentifier = normalizeLoginIdentifier(username);
+    if (!normalizedIdentifier || !password) {
+      setError("Geçerli kullanıcı adı veya e-posta ile şifrenizi girin.");
       return;
     }
 
@@ -112,12 +112,18 @@ export default function LoginScreen() {
 
     try {
       const { data, error: authError } = await supabase.functions.invoke("username-login", {
-        body: { username: normalizedUsername, password },
+        body: { username: normalizedIdentifier, password },
       });
       if (authError) {
         const details = await edgeFunctionErrorDetails(authError);
         if (details.code === "EMAIL_VERIFICATION_REQUIRED") {
-          setVerificationUsername(details.username ?? normalizedUsername);
+          const pendingUsername = details.username
+            ?? (normalizedIdentifier.includes("@") ? "" : normalizeUsername(normalizedIdentifier));
+          if (!pendingUsername) {
+            setError("E-posta doğrulaması için kullanıcı adı alınamadı. Lütfen tekrar deneyin.");
+            return;
+          }
+          setVerificationUsername(pendingUsername);
           setVerificationPassword(password);
           setMaskedEmail(details.maskedEmail ?? null);
           setVerificationCode("");
@@ -284,12 +290,19 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError("");
-    const { error: completionError } = await supabase.functions.invoke("complete-password-reset", {
+    const { data, error: completionError } = await supabase.functions.invoke("complete-password-reset", {
       body: { resetTicket, newPassword },
     });
     setLoading(false);
     if (completionError) {
       setError(await edgeFunctionError(completionError));
+      return;
+    }
+    if (
+      !data?.updated || data.reauthenticationRequired !== true
+      || typeof data.username !== "string" || !data.username
+    ) {
+      setError("Şifre yenilendi ancak giriş bilgisi alınamadı. Destek ile iletişime geçin.");
       return;
     }
     setRecoveryStage(null);
@@ -298,9 +311,11 @@ export default function LoginScreen() {
     setNewPassword("");
     setNewPasswordAgain("");
     setMode("signIn");
-    setUsername(recoveryIdentifier.includes("@") ? "" : normalizeUsername(recoveryIdentifier));
+    setUsername(data.username);
     setPassword("");
-    setNotice("Şifreniz yenilendi. Yeni şifrenizle giriş yapabilirsiniz.");
+    setNotice(data.accountLocksCleared === false
+      ? `Şifreniz yenilendi. Kullanıcı adınız ${data.username}. Hesaba özel güvenlik kilidi en geç 15 dakika içinde kalkınca giriş yapın.`
+      : `Şifreniz yenilendi. Kullanıcı adınız ${data.username}; yeni şifrenizle giriş yapmayı deneyin.`);
   }
 
   const kicker = isVerification ? "E-POSTA DOĞRULAMASI"
@@ -372,7 +387,15 @@ export default function LoginScreen() {
                   <Field label="E-posta" value={recoveryEmail} onChangeText={setRecoveryEmail} placeholder="ornek@email.com" autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress" />
                 </> : null}
 
-                <Field label="Kullanıcı adı" value={username} onChangeText={setUsername} placeholder="örn. ismail" autoCapitalize="none" autoCorrect={false} textContentType="username" />
+                <Field
+                  label={isRegister ? "Kullanıcı adı" : "Kullanıcı adı veya e-posta"}
+                  value={username}
+                  onChangeText={setUsername}
+                  placeholder={isRegister ? "örn. ismail" : "kullaniciadi veya ornek@email.com"}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="username"
+                />
                 <Text style={styles.label}>Şifre</Text>
                 <View style={styles.passwordRow}>
                   <TextInput style={styles.passwordInput} value={password} onChangeText={setPassword} placeholder="En az 8 karakter" placeholderTextColor="#98a09b" secureTextEntry={secure} textContentType={isRegister ? "newPassword" : "password"} onSubmitEditing={isRegister ? undefined : signIn} returnKeyType={isRegister ? "next" : "done"} />
