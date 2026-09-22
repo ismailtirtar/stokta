@@ -11,6 +11,9 @@ const migrationName = readdirSync(new URL("../supabase/migrations/", import.meta
 
 assert.ok(migrationName, "PDF stok aktarımı migration dosyası bulunamadı");
 const migrationSource = source(`supabase/migrations/${migrationName}`);
+const operatorMigrationSource = source(
+  "supabase/migrations/20260922113000_platform_operator_write_access.sql",
+);
 
 test("PDF kaynağı saklanmadan işletme içinde mükerrer aktarım önlenir", () => {
   assert.match(migrationSource, /create table private\.pdf_stock_imports/);
@@ -38,4 +41,13 @@ test("Tüm ürünler sabit sırada kilitlenir ve tek RPC işleminde uygulanır",
   assert.match(migrationSource, /create or replace function public\.record_pdf_stock_import/);
   assert.match(migrationSource, /language sql\s+security invoker/);
   assert.match(migrationSource, /select private\.record_pdf_stock_import/);
+});
+
+test("Platform yöneticisi yalnızca kendi işletmesinde yazma kilidini aşabilir", () => {
+  assert.match(operatorMigrationSource, /id = \(select auth\.uid\(\)\)/);
+  assert.match(operatorMigrationSource, /organization_id = p_organization_id/);
+  assert.match(operatorMigrationSource, /and is_platform_operator/);
+  assert.match(operatorMigrationSource, /and is_active/);
+  assert.match(operatorMigrationSource, /and not must_change_password/);
+  assert.match(operatorMigrationSource, /perform private\.require_current_ugc_terms/);
 });
