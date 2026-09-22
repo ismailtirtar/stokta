@@ -155,7 +155,17 @@ jobs:
 
             UNEXPECTED_FILES="$(
               git diff --name-only "$BUILD_GIT_COMMIT" "$WORKFLOW_SHA" -- |
-                grep -Ev '^(\.github/workflows/eas-google-play-submit\.yml|\.github/google-play-submit-request\.json)
+                grep -Ev '^(\.github/workflows/eas-google-play-submit\.yml|\.github/google-play-submit-request\.json)$' || true
+            )"
+            if [ -n "$UNEXPECTED_FILES" ]; then
+              echo "::error::Files outside the one-time submission controls changed after the approved build:"
+              printf '%s\n' "$UNEXPECTED_FILES"
+              exit 1
+            fi
+          fi
+
+          echo "git_commit=$BUILD_GIT_COMMIT" >> "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -238,132 +248,6 @@ jobs:
           fi
           if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$VERSION_CODE" != "25" ]; then
             echo "::error::The EAS build version code is not the approved one-time release."
-            exit 1
-          fi
-
-          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
-          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
-
-      - name: Submit to Google Play internal testing
-        env:
-          BUILD_ID: ${{ steps.build.outputs.build_id }}
-        run: |
-          set -uo pipefail
-          set +e
-          eas submit --platform android --profile production --id "$BUILD_ID" \
-            --non-interactive --wait --verbose 2>&1 | tee eas-submit.log
-          SUBMIT_STATUS="${PIPESTATUS[0]}"
-          set -e
-
-          if [ "$SUBMIT_STATUS" -ne 0 ]; then
-            if grep -Eqi 'Google Service Account Keys cannot be set up|Google Play.*service account|service account.*not (configured|found)' eas-submit.log; then
-              echo "::error::Google Play Android Publisher service account is not configured in EAS. Configure the least-privilege Play service account before retrying; no credential was added to this repository."
-            else
-              echo "::error::EAS failed to submit build $BUILD_ID to Google Play. See eas-submit.log."
-            fi
-            exit "$SUBMIT_STATUS"
-          fi
-
-          eas submit:list --platform android --limit 1 --json > eas-submit.json
-
-      - name: Record submission provenance
-        if: always()
-        env:
-          APP_VERSION: ${{ needs.validate.outputs.app_version }}
-          BUILD_ID: ${{ steps.build.outputs.build_id }}
-          GIT_COMMIT: ${{ steps.source.outputs.git_commit }}
-          VERSION_CODE: ${{ steps.build.outputs.version_code }}
-        run: |
-          mkdir -p submission-artifacts
-          for file in eas-build.json eas-submit.log eas-submit.json; do
-            if [ -f "$file" ]; then
-              cp "$file" submission-artifacts/"$file"
-            fi
-          done
-          jq -n \
-            --arg build_id "$BUILD_ID" \
-            --arg git_commit "$GIT_COMMIT" \
-            --arg version "$APP_VERSION" \
-            --arg version_code "$VERSION_CODE" \
-            '{buildId: $build_id, gitCommitHash: $git_commit, appVersion: $version, appBuildVersion: $version_code}' \
-            > submission-artifacts/submission-provenance.json
-
-      - name: Upload submission record
-        if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: stokdas-${{ needs.validate.outputs.app_version }}-${{ steps.build.outputs.version_code || 'unknown' }}-google-play-submission
-          path: submission-artifacts/
-          if-no-files-found: error
-          retention-days: 30
- || true
-            )"
-            if [ -n "$UNEXPECTED_FILES" ]; then
-              echo "::error::Files outside the one-time submission controls changed after the approved build:"
-              printf '%s\n' "$UNEXPECTED_FILES"
-              exit 1
-            fi
-          fi
-
-          echo "git_commit=$BUILD_GIT_COMMIT" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Set up EAS CLI
-        uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
-        with:
-          eas-version: 23.0.0
-          packager: npm
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Resolve and verify Android build
-        id: build
-        env:
-          EXPECTED_APPLICATION_ID: ${{ needs.validate.outputs.app_identifier }}
-          EXPECTED_GIT_COMMIT: ${{ steps.source.outputs.git_commit }}
-          EXPECTED_PROJECT_ID: ${{ needs.validate.outputs.eas_project_id }}
-          EXPECTED_VERSION: ${{ needs.validate.outputs.app_version }}
-        run: |
-          set -euo pipefail
-          BUILD_ID="$REQUESTED_BUILD_ID"
-          if ! [[ "$BUILD_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
-            echo "::error::A valid EAS build UUID is required."
-            exit 1
-          fi
-
-          eas build:view "$BUILD_ID" --json > eas-build.json
-          STATUS="$(jq -r '.status // empty' eas-build.json)"
-          PLATFORM="$(jq -r '.platform // empty' eas-build.json)"
-          VERSION="$(jq -r '.appVersion // empty' eas-build.json)"
-          VERSION_CODE="$(jq -r '.appBuildVersion // empty' eas-build.json)"
-          APPLICATION_ID="$(jq -r '.appIdentifier // empty' eas-build.json)"
-          PROJECT_ID="$(jq -r '.app.id // empty' eas-build.json)"
-          BUILD_PROFILE="$(jq -r '.buildProfile // empty' eas-build.json)"
-          DISTRIBUTION="$(jq -r '.distribution // empty' eas-build.json)"
-          GIT_COMMIT="$(jq -r '.gitCommitHash // empty' eas-build.json)"
-
-          if [ "$STATUS" != "FINISHED" ] || [ "$PLATFORM" != "ANDROID" ]; then
-            echo "::error::Build is not a finished Android build (status=$STATUS, platform=$PLATFORM)."
-            exit 1
-          fi
-          if [ "$VERSION" != "$EXPECTED_VERSION" ] || [ "$APPLICATION_ID" != "$EXPECTED_APPLICATION_ID" ]; then
-            echo "::error::EAS build identity does not match the checked-out application."
-            exit 1
-          fi
-          if [ "$PROJECT_ID" != "$EXPECTED_PROJECT_ID" ] || [ "$BUILD_PROFILE" != "production" ] || [ "$DISTRIBUTION" != "STORE" ]; then
-            echo "::error::EAS build project, profile, or distribution is not the Stokdaş production release."
-            exit 1
-          fi
-          if [ "$GIT_COMMIT" != "$EXPECTED_GIT_COMMIT" ]; then
-            echo "::error::EAS build commit $GIT_COMMIT does not match main commit $EXPECTED_GIT_COMMIT."
-            exit 1
-          fi
-          if ! [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::Invalid Android version code $VERSION_CODE."
             exit 1
           fi
 
