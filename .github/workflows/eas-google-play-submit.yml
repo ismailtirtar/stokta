@@ -96,11 +96,7 @@ jobs:
 
   submit:
     name: Submit AAB to Google Play internal testing
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' &&
-       github.ref == 'refs/heads/main' &&
-       github.event.head_commit.message == 'Build 5129dc41 dahili teste gönder [submit-google-play-internal] [skip-android-build]')
+    if: github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -120,9 +116,8 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-          fetch-depth: 0
 
-      - name: Capture and verify release source
+      - name: Capture main commit
         id: source
         run: |
           set -euo pipefail
@@ -130,50 +125,18 @@ jobs:
             echo "::error::Google Play submissions must use the main branch."
             exit 1
           fi
-
-          WORKFLOW_SHA="$(git rev-parse HEAD)"
-          if [ "$WORKFLOW_SHA" != "$GITHUB_SHA" ]; then
-            echo "::error::Checked-out commit $WORKFLOW_SHA does not match workflow commit $GITHUB_SHA."
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          if [ "$RELEASE_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked-out commit $RELEASE_SHA does not match workflow commit $GITHUB_SHA."
             exit 1
           fi
-
-          BUILD_GIT_COMMIT="$WORKFLOW_SHA"
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            BUILD_GIT_COMMIT="$(jq -er '.gitCommitHash' .github/google-play-submit-request.json)"
-            if [ "$BUILD_GIT_COMMIT" != "cd4c6cab4feed683c72e4e289223c98ae90af25a" ]; then
-              echo "::error::The one-time request is not locked to the approved Android build commit."
-              exit 1
-            fi
-            if ! git cat-file -e "$BUILD_GIT_COMMIT^{commit}" 2>/dev/null; then
-              echo "::error::The approved Android build commit is not present in repository history."
-              exit 1
-            fi
-            if ! git merge-base --is-ancestor "$BUILD_GIT_COMMIT" "$WORKFLOW_SHA"; then
-              echo "::error::The approved Android build commit is not an ancestor of this workflow commit."
-              exit 1
-            fi
-
-            UNEXPECTED_FILES="$(
-              git diff --name-only "$BUILD_GIT_COMMIT" "$WORKFLOW_SHA" -- |
-                grep -Ev '^(\.github/workflows/eas-google-play-submit\.yml|\.github/google-play-submit-request\.json)$' || true
-            )"
-            if [ -n "$UNEXPECTED_FILES" ]; then
-              echo "::error::Files outside the one-time submission controls changed after the approved build:"
-              printf '%s\n' "$UNEXPECTED_FILES"
-              exit 1
-            fi
-          fi
-
-          echo "git_commit=$BUILD_GIT_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "git_commit=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
-
-      - name: Install submission dependencies
-        run: npm ci
 
       - name: Set up EAS CLI
         uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
@@ -192,27 +155,6 @@ jobs:
         run: |
           set -euo pipefail
           BUILD_ID="$REQUESTED_BUILD_ID"
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            BUILD_ID="$(jq -er '.buildId' .github/google-play-submit-request.json)"
-            REQUEST_GIT_COMMIT="$(jq -er '.gitCommitHash' .github/google-play-submit-request.json)"
-            REQUEST_VERSION="$(jq -er '.appVersion' .github/google-play-submit-request.json)"
-            REQUEST_VERSION_CODE="$(jq -er '.appBuildVersion' .github/google-play-submit-request.json)"
-            REQUEST_IDENTIFIER="$(jq -er '.appIdentifier' .github/google-play-submit-request.json)"
-            REQUEST_PROJECT_ID="$(jq -er '.easProjectId' .github/google-play-submit-request.json)"
-            REQUEST_TRACK="$(jq -er '.track' .github/google-play-submit-request.json)"
-
-            if [ "$BUILD_ID" != "5129dc41-b421-4c32-986f-ceb0118d5e7a" ] ||
-               [ "$REQUEST_GIT_COMMIT" != "cd4c6cab4feed683c72e4e289223c98ae90af25a" ] ||
-               [ "$REQUEST_VERSION" != "1.3.4" ] ||
-               [ "$REQUEST_VERSION_CODE" != "25" ] ||
-               [ "$REQUEST_IDENTIFIER" != "com.ismailtirtar.stokta" ] ||
-               [ "$REQUEST_PROJECT_ID" != "6d9c0250-c796-4458-9fdb-99e50b690c3b" ] ||
-               [ "$REQUEST_TRACK" != "internal" ]; then
-              echo "::error::The one-time Google Play request does not match the approved internal-test release."
-              exit 1
-            fi
-          fi
-
           if ! [[ "$BUILD_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
             echo "::error::A valid EAS build UUID is required."
             exit 1
@@ -247,10 +189,6 @@ jobs:
           fi
           if ! [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::Invalid Android version code $VERSION_CODE."
-            exit 1
-          fi
-          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$VERSION_CODE" != "25" ]; then
-            echo "::error::The EAS build version code is not the approved one-time release."
             exit 1
           fi
 
