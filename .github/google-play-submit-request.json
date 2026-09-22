@@ -1,8 +1,8 @@
 {
-  "buildId": "b6a28673-fd6f-454b-b874-3cf0ade3f568",
-  "gitCommitHash": "14d935c8e7bb15bd92233d15985dc930c1e7f07d",
+  "buildId": "5129dc41-b421-4c32-986f-ceb0118d5e7a",
+  "gitCommitHash": "cd4c6cab4feed683c72e4e289223c98ae90af25a",
   "appVersion": "1.3.4",
-  "appBuildVersion": "22",
+  "appBuildVersion": "25",
   "appIdentifier": "com.ismailtirtar.stokta",
   "easProjectId": "6d9c0250-c796-4458-9fdb-99e50b690c3b",
   "track": "internal"
