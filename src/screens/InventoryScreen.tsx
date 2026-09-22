@@ -203,6 +203,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
     || (subscriptionStatus === "active" && (!currentPeriodEnd || new Date(currentPeriodEnd).getTime() > now));
   const subscriptionLabel = subscriptionStatus === "trial" ? "Deneme"
     : subscriptionStatus === "active" ? "Aktif"
+    : subscriptionStatus === "inactive" ? "İnaktif"
     : subscriptionStatus === "past_due" ? "Ödeme bekliyor"
     : subscriptionStatus === "suspended" ? "Askıda"
     : "İptal edildi";
@@ -436,7 +437,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
               accessibilityRole="button"
               accessibilityLabel="Google Play aboneliğini yenile"
             >
-              <Text style={styles.subscriptionActionText}>{["Ödeme bekliyor", "Askıda"].includes(subscriptionLabel) ? "Google Play'de yönet" : "Google Play'den yenile"}</Text>
+              <Text style={styles.subscriptionActionText}>{["Ödeme bekliyor", "İnaktif", "Askıda"].includes(subscriptionLabel) ? "Google Play'de yönet" : "Google Play'den yenile"}</Text>
             </Pressable> : null}
           </View> : null}
           <View style={styles.statsGrid}>
