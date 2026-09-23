@@ -45,6 +45,7 @@ type ScreenState = "idle" | "launching" | "verifying" | "restoring" | "pending" 
 
 const PURCHASE_REVERIFY_TTL_MS = 30_000;
 const AUTOMATIC_RECONCILE_TTL_MS = 60_000;
+const SUPPORT_EMAIL = "tirtarismail@gmail.com";
 
 export default function SubscriptionModal({
   visible,
@@ -205,7 +206,7 @@ function NativeSubscriptionModal({
       if (data?.store === "google" && data.subscriptionStatus === "suspended") {
         setScreenState("pending");
         setError("");
-        setStoreMessage("İşletme erişimi platform güvenlik kararıyla askıya alınmış. Google Play aboneliğini doğrulamak veya geri yüklemek bu kısıtlamayı kaldırmaz; destek için Stokdaş ile iletişime geçin.");
+        setStoreMessage(`İşletme hesabı askıda. Bu durum ödeme gecikmesi veya platform kararı nedeniyle oluşabilir. Google Play ödeme durumunuzu kontrol edin ve hesabın yeniden açılması için ${SUPPORT_EMAIL} adresinden Stokdaş desteğiyle iletişime geçin. Satın alımları geri yüklemek erişimi tek başına açmaz.`);
         await onSubscriptionUpdatedRef.current();
         return;
       }
@@ -360,6 +361,14 @@ function NativeSubscriptionModal({
     }
   }
 
+  async function openSupportEmail() {
+    try {
+      await Linking.openURL(`mailto:${SUPPORT_EMAIL}`);
+    } catch {
+      setError(`E-posta uygulaması açılamadı. ${SUPPORT_EMAIL} adresine yazın.`);
+    }
+  }
+
   const busy = screenState === "launching" || screenState === "verifying" || screenState === "restoring";
   const statusDetail = subscriptionStatusDetail(subscriptionLabel, trialEndsAt, currentPeriodEnd);
   const currentPeriodExpired = Boolean(currentPeriodEnd) && new Date(currentPeriodEnd ?? 0).getTime() <= Date.now();
@@ -476,6 +485,14 @@ function NativeSubscriptionModal({
             >
               <Text style={styles.manageButtonText}>Google Play'de aboneliği yönet</Text>
             </Pressable> : null}
+            {subscriptionLabel === "Askıda" ? <Pressable
+              style={styles.manageButton}
+              onPress={() => void openSupportEmail()}
+              accessibilityRole="link"
+              accessibilityLabel="Askıdaki işletme hesabı için Stokdaş desteğine e-posta gönder"
+            >
+              <Text style={styles.manageButtonText}>Stokdaş desteğine e-posta gönder</Text>
+            </Pressable> : null}
             <Text style={styles.footerText}>Kart ve ödeme yöntemi ayrıntıları Stokdaş tarafından görülmez veya saklanmaz; ödeme Google Play tarafından yürütülür.</Text>
           </ScrollView>
         </View>
@@ -500,6 +517,7 @@ function subscriptionStatusDetail(label: string, trialEndsAt: string | null, cur
   if (label === "Deneme" && trialEndsAt) return `Uygulama içi deneme ${formatDate(trialEndsAt)} tarihinde sona erer.`;
   if (label === "Aktif" && currentPeriodEnd) return `Mevcut dönem ${formatDate(currentPeriodEnd)} tarihine kadar geçerli.`;
   if (label === "Aktif") return "İşletme erişimi etkin.";
+  if (label === "Askıda") return "Erişimin yeniden açılması için Stokdaş desteğiyle iletişime geçin.";
   return "Abonelik yenilendiğinde yazma işlemleri yeniden açılır.";
 }
 
