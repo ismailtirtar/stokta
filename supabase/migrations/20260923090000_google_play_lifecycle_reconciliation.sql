@@ -167,6 +167,7 @@ declare web_until timestamptz;
 declare organization_status text;
 declare organization_period_end timestamptz;
 declare play_entitled boolean;
+declare refunded_current_order boolean := false;
 begin
   result := private.service_record_google_play_subscription_core(
     p_purchase_token_hash, p_user_id, p_organization_id,
@@ -176,6 +177,26 @@ begin
     p_is_test_purchase, p_latest_order_id_hash,
     p_external_account_id_hash, p_external_profile_id_hash
   );
+
+  -- A successful GET can still show ACTIVE after a refund. Until the voided
+  -- orders sweep is complete and recent, roll back any Play grant from the
+  -- core (including calls through the old public RPC).
+  if exists (
+    select 1 from private.google_play_entitlements e
+    where e.organization_id = p_organization_id
+      and e.current_purchase_token_hash = p_purchase_token_hash
+      and e.entitled and e.current_period_end > now()
+  ) and not exists (
+    select 1 from private.google_play_void_scan_state v
+    where v.singleton = true and v.page_token is null
+      and v.last_completed_at > now() - interval '15 minutes'
+  ) then
+    raise exception 'Google Play refund scan is not current' using errcode = '55000';
+  end if;
+
+  -- Serialize against an operator approving an IBAN payment. Read the paid
+  -- period only after taking the same organization lock as the reviewer RPC.
+  perform 1 from public.organizations where id = p_organization_id for update;
 
   select max(activated_until) into web_until
   from public.web_payment_notifications
@@ -198,20 +219,20 @@ begin
     update private.google_play_entitlements set entitled = false, updated_at = now()
     where current_purchase_token_hash = p_purchase_token_hash;
     if found then
+      refunded_current_order := true;
       update public.organizations
       set subscription_status = case
             when subscription_status = 'suspended' then 'suspended'
             when web_until > now() then 'active' else 'past_due' end,
           current_period_end = case when web_until > now()
-            then greatest(coalesce(current_period_end, web_until), web_until)
-            else now() end,
+            then web_until else now() end,
           updated_at = now()
       where id = p_organization_id;
     end if;
   end if;
 
   -- Google reconciliation must not shorten an approved IBAN payment period.
-  if web_until > now() then
+  if web_until > now() and not refunded_current_order then
     update public.organizations
     set subscription_status = case when subscription_status = 'suspended'
         then 'suspended' else 'active' end,
@@ -307,21 +328,23 @@ begin
      or subscription.latest_order_id_hash is distinct from p_order_hash then
     return false;
   end if;
-  select max(activated_until) into web_until from public.web_payment_notifications
-  where organization_id = subscription.organization_id and status = 'approved'
-    and activated_until > now();
   update private.google_play_subscriptions set entitled = false
   where purchase_token_hash = p_token_hash;
   update private.google_play_entitlements set entitled = false, updated_at = now()
   where current_purchase_token_hash = p_token_hash;
   if found then
+    -- Match the core's subscription -> entitlement -> organization lock order.
+    perform 1 from public.organizations
+    where id = subscription.organization_id for update;
+    select max(activated_until) into web_until from public.web_payment_notifications
+    where organization_id = subscription.organization_id and status = 'approved'
+      and activated_until > now();
     update public.organizations
     set subscription_status = case
           when subscription_status = 'suspended' then 'suspended'
           when web_until > now() then 'active' else 'past_due' end,
         current_period_end = case when web_until > now()
-          then greatest(coalesce(current_period_end, web_until), web_until)
-          else now() end,
+          then web_until else now() end,
         updated_at = now()
     where id = subscription.organization_id;
     return true;
@@ -343,21 +366,22 @@ begin
      or subscription.organization_id <> p_organization_id then
     return false;
   end if;
-  select max(activated_until) into web_until from public.web_payment_notifications
-  where organization_id = subscription.organization_id and status = 'approved'
-    and activated_until > now();
   update private.google_play_subscriptions set entitled = false
   where purchase_token_hash = p_token_hash;
   update private.google_play_entitlements set entitled = false, updated_at = now()
   where current_purchase_token_hash = p_token_hash;
   if found then
+    perform 1 from public.organizations
+    where id = subscription.organization_id for update;
+    select max(activated_until) into web_until from public.web_payment_notifications
+    where organization_id = subscription.organization_id and status = 'approved'
+      and activated_until > now();
     update public.organizations
     set subscription_status = case
           when subscription_status = 'suspended' then 'suspended'
           when web_until > now() then 'active' else 'past_due' end,
         current_period_end = case when web_until > now()
-          then greatest(coalesce(current_period_end, web_until), web_until)
-          else now() end,
+          then web_until else now() end,
         updated_at = now()
     where id = p_organization_id;
   end if;
@@ -465,7 +489,7 @@ create function public.service_reset_google_play_void_cursor(
 begin
   update private.google_play_void_scan_state
   set start_time_ms = (extract(epoch from now() - interval '29 days') * 1000)::bigint,
-      page_token = null, updated_at = now()
+      page_token = null, last_completed_at = null, updated_at = now()
   where singleton = true and start_time_ms = p_expected_start
     and page_token is not distinct from p_expected_page;
   return found;
@@ -493,6 +517,45 @@ begin
     'overdueCount', overdue_count,
     'failedDueCount', failed_count,
     'voidLastCompletedAt', last_void_scan);
+end;
+$$;
+
+-- The existing fifteen-minute cron calls this function by name. HOLD and
+-- PAUSED set past_due in the unchanged Play core; include those expired or
+-- undated periods in the established seven-day IBAN grace flow.
+create or replace function private.refresh_expired_organization_statuses()
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare inactive_count integer := 0;
+declare suspended_count integer := 0;
+begin
+  update public.organizations
+  set subscription_status = 'inactive',
+      inactive_since = case
+        when subscription_status = 'trial' then trial_ends_at
+        else coalesce(current_period_end, now())
+      end,
+      updated_at = now()
+  where (subscription_status = 'trial'
+      and trial_ends_at is not null and trial_ends_at <= now())
+    or (subscription_status = 'active'
+      and current_period_end is not null and current_period_end <= now())
+    or (subscription_status = 'past_due'
+      and (current_period_end is null or current_period_end <= now()));
+  get diagnostics inactive_count = row_count;
+
+  update public.organizations as organization
+  set subscription_status = 'suspended', updated_at = now()
+  where organization.subscription_status = 'inactive'
+    and organization.inactive_since <= now() - interval '7 days'
+    and not exists (
+      select 1 from public.web_payment_notifications as notification
+      where notification.organization_id = organization.id
+        and notification.status = 'pending'
+    );
+  get diagnostics suspended_count = row_count;
+
+  return jsonb_build_object('inactive_count', inactive_count,
+    'suspended_count', suspended_count, 'processed_at', now());
 end;
 $$;
 

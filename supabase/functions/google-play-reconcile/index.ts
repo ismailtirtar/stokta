@@ -2,9 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.112.3";
 import { GooglePlayClient, GooglePlayError } from "../_shared/google_play.ts";
 import { decryptPurchaseToken } from "../_shared/google_play_token.ts";
+import type { PlayClaim, PlayOwner } from "../_shared/google_play_sync.ts";
 import {
-  PlayClaim,
-  PlayOwner,
   processGooglePlayToken,
   transientPlayFailure,
 } from "../_shared/google_play_sync.ts";
@@ -112,6 +111,16 @@ Deno.serve(async (req: Request) => {
       },
     );
     if (advanceError || advanced !== true) throw new Error("İade imleci ilerletilemedi");
+
+    // A later page may contain a refund for a token due below. The SQL grant
+    // gate also protects mobile verification and RTDN until the full sweep
+    // finishes, so never start entitlement refresh on a partial scan.
+    if (page.nextPageToken !== null) {
+      return json(200, {
+        ok: true, voided: page.purchases.length,
+        moreVoidPages: true, reconciled: 0, failed: 0,
+      });
+    }
 
     const { data: due, error: claimError } = await admin.rpc(
       "service_claim_due_google_play_tokens", { p_limit: 2 },

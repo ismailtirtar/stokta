@@ -12,6 +12,14 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    Eski RPC imzasını, `service_role` dışındaki EXECUTE izinlerini, private
    tablolarda FORCE RLS'yi ve ilk satın alma ile mevcut token güncellemesini
    sınayın. Geçiş, beklenmeyen eski RPC gövdesinde bilinçli olarak hata verir.
+   Canlı geçişte iade taraması tam ve son 15 dakika içinde başarılı olana
+   kadar Play hak açma çağrıları bilinçli olarak 503 döner. Mevcut hakların
+   süresi değişmez; yeni satın alma/yenileme doğrulaması bu sürede gecikir.
+   Sırları, topic/subscription'ı ve zamanlayıcıyı geçişten önce hazırlayın;
+   geçiş sonrası hemen taramayı başlatıp çok sayfalı tarama bitene dek tekrar
+   çağırın. Sağlık çıktısında `voidLastCompletedAt` dolmadan canlı
+   doğrulamayı tamamlanmış saymayın. Kesintisiz yeni satın alma garantisi
+   için ayrıca aşamalı veri geçişi gerekir; bu sürümün dağıtım kapısıdır.
 2. Supabase Edge secret'larını ekleyin:
    `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (mevcut Publisher servis hesabı),
    `GOOGLE_PLAY_TOKEN_ENCRYPTION_KEY` (tam 32 rastgele byte'ın standart
@@ -45,7 +53,12 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    `Authorization: Bearer <GOOGLE_PLAY_RECONCILE_SECRET>` değerini Supabase
    Vault'tan okuyun. `pg_cron` + `pg_net` veya tek bir harici scheduler
    kullanın; aynı isimli ikinci işi kurmayın. HTTP timeout en az 60 saniye
-   olsun. Yanıt 5xx ve dead-letter alarmlarını etkinleştirin.
+   olsun. Yanıt 5xx ve dead-letter alarmlarını etkinleştirin. HTTP 200
+   yanıtındaki `failed > 0` için de alarm kurun: tekil token hataları diğer
+   tokenları durdurmadan ertelenir. `service_google_play_lifecycle_health()`
+   içindeki `voidLastCompletedAt` 10 dakikadan eskiyse uyarın (15 dakikada
+   Play grant kapanır); `overdueCount` ve `failedDueCount` artışlarını ve
+   `unvaultedCount` başlangıç değerini izleyin.
 7. Önce Play lisans test hesabıyla satın alma/ACK ve restore, ardından
    yenileme, dönem sonu iptal, grace/hold, iade edilen son sipariş, eski
    döneme ait iade, Pub/Sub yeniden teslimatı ve onaylı IBAN dönemi
@@ -53,6 +66,15 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    kuruluş erişimi ve `service_google_play_lifecycle_health()` çıktısını
    karşılaştırın. Operatör TOTP/AAL2 ve normal yönetici/çalışan girişlerini
    ayrıca kontrol edin.
+8. **Açık test yayın kapısı:** Play Console taban planında “Yeniden abone ol”
+   şu an “İzin ver”. `linkedPurchaseToken` ve
+   `outOfAppPurchaseContext.expiredPurchaseToken` içeren yeni tokenlar bu
+   sürümde güvenli hesap devri kurulamadığından 409 ile reddedilir; yeni
+   ücretli işlem ACK alamayabilir. Yeni token devri Google tarafından
+   doğrulanmış eski token sahipliğiyle uygulama+SQL düzeyinde test edilmeden
+   veya Play Console'da bu akışların tümünün engellendiği (hold/erken tekrar
+   alım dahil) gerçek satın alma testleriyle doğrulanmadan dağıtmayın.
+   “Yeniden abone ol” seçeneğini tek başına kapatmak yeterli kabul edilmez.
 
 ## Çalışma ve sınırlar
 
@@ -71,14 +93,18 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
   eklenir; hash'ten geriye token çıkarılamaz. Sağlık çıktısındaki
   `unvaultedCount` sıfıra yaklaşana kadar bu hesaplarda periyodik sorgu
   mümkün değildir.
-- Uzlaştırma önce Voided Purchases API'nin sayfasını kaydeder, sonra bilinen
-  tokenları GET ile yeniler. İade taraması başarısızsa o turda yeni hak vermez.
+- Uzlaştırma önce Voided Purchases API'nin tüm sayfalarını kaydeder, yalnız
+  son sayfa tamamlanınca bilinen tokenları GET ile yeniler. SQL'deki ortak
+  grant kapısı mobil/RTDN yollarını da tam ve son 15 dakikalık taramaya
+  bağlar. İade taraması başarısızsa yeni Play hakkı vermez.
   İlk tarama 29 günlük pencereyi kullanır; sonraki tam turlarda 2 günlük
   örtüşme vardır. 29 günden uzun kesinti logda alarm gerektirir, çünkü
   Google API daha eski void kayıtlarını getiremez.
 - `suspended` hesaplar otomatik açılmaz. Mevcut 7 günlük inaktif dönemin
   sonundaki askı ve idari askı aynı alanı kullandığından otomatik reaktivasyon
   ayrı bir ürün/veri modeli kararı gerektirir.
+- İade edilen son Google siparişi için onaylı IBAN dönemi varsa işletmenin
+  bitişi o IBAN tarihine indirilir; iade edilmiş Google dönemi hakkı uzatmaz.
 
 ## Kaynaklar
 
