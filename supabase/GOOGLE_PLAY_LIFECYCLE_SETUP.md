@@ -12,6 +12,7 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    Eski RPC imzasını, `service_role` dışındaki EXECUTE izinlerini, private
    tablolarda FORCE RLS'yi ve ilk satın alma ile mevcut token güncellemesini
    sınayın. Ayrıca eski token → yeni token devri, ACK öncesi/sırası yarış,
+   B bekleyen alımı iptal → C yeniden alım → geç gelen B gözlemi yarışı,
    terk edilmiş bekleyen tokenın tekrar hak açmaması, bağımsız başka geçerli
    aboneliğin korunması ve profil/kuruluş silinmesinde kasa ile ilişki
    özetlerinin cascade temizliğini sınayın. Geçiş, beklenmeyen eski RPC
