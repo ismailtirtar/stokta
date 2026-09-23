@@ -148,8 +148,10 @@ export function createGooglePlayPushVerifier(
     if (!key) return false;
     let signatureValid: boolean;
     try {
+      const signatureBytes = new Uint8Array(new ArrayBuffer(signature.byteLength));
+      signatureBytes.set(signature);
       signatureValid = await crypto.subtle.verify(
-        "RSASSA-PKCS1-v1_5", key, signature,
+        "RSASSA-PKCS1-v1_5", key, signatureBytes,
         new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
       );
     } catch {

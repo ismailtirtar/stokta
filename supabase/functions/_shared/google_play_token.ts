@@ -30,7 +30,9 @@ async function tokenKey() {
       if (bytes.byteLength !== 32) {
         throw new GooglePlayError("CONFIGURATION", 500, "Satın alma anahtarı yapılandırması eksik");
       }
-      return await crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
+      const keyBytes = new Uint8Array(new ArrayBuffer(32));
+      keyBytes.set(bytes);
+      return await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt", "decrypt"]);
     })().catch((error) => {
       cachedKey = undefined;
       throw error;

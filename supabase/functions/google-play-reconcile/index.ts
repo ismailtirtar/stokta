@@ -34,7 +34,7 @@ async function authorized(req: Request) {
   );
   const [left, right] = await Promise.all([digest(expected), digest(supplied)]);
   let difference = 0;
-  for (let i = 0; i < left.length; i++) difference |= left[i] ^ right[i];
+  for (let i = 0; i < left.length; i++) difference |= left[i]! ^ right[i]!;
   return difference === 0;
 }
 
