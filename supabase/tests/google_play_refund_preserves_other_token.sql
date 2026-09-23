@@ -7,7 +7,7 @@ begin;
 do $$
 declare
   purchaser uuid;
-  organization uuid;
+  test_organization uuid;
   token_a text := repeat('a', 64);
   token_b text := repeat('b', 64);
   order_a text := repeat('c', 64);
@@ -19,7 +19,7 @@ declare
   entitlement private.google_play_entitlements;
   b_ledger private.google_play_subscriptions;
 begin
-  select p.id, p.organization_id into purchaser, organization
+  select p.id, p.organization_id into purchaser, test_organization
   from public.profiles p
   join public.organizations o on o.id = p.organization_id
   where p.role = 'admin' and p.is_active and not p.must_change_password
@@ -39,18 +39,18 @@ begin
   end if;
 
   account_hash := encode(extensions.digest(convert_to(purchaser::text, 'UTF8'), 'sha256'), 'hex');
-  profile_hash := encode(extensions.digest(convert_to(organization::text, 'UTF8'), 'sha256'), 'hex');
+  profile_hash := encode(extensions.digest(convert_to(test_organization::text, 'UTF8'), 'sha256'), 'hex');
   update private.google_play_void_scan_state
   set page_token = null, last_completed_at = now()
   where singleton = true;
 
   perform public.service_record_google_play_subscription(
-    token_a, purchaser, organization, 'stokdas_pro', 'monthly',
+    token_a, purchaser, test_organization, 'stokdas_pro', 'monthly',
     'SUBSCRIPTION_STATE_ACTIVE', 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
     true, now(), a_expiry, true, true, order_a, account_hash, profile_hash
   );
   select * into entitlement from private.google_play_entitlements
-  where organization_id = organization;
+  where organization_id = test_organization;
   if entitlement.current_purchase_token_hash is distinct from token_a
      or not entitlement.entitled then
     raise exception 'Fixture A did not become the valid entitlement';
@@ -61,12 +61,12 @@ begin
   -- refunded. Its grant must never replace the independent valid A pointer.
   perform public.service_record_google_play_void(token_b, order_b, now());
   perform public.service_record_google_play_subscription(
-    token_b, purchaser, organization, 'stokdas_pro', 'monthly',
+    token_b, purchaser, test_organization, 'stokdas_pro', 'monthly',
     'SUBSCRIPTION_STATE_ACTIVE', 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
     true, now(), b_expiry, true, true, order_b, account_hash, profile_hash
   );
   select * into entitlement from private.google_play_entitlements
-  where organization_id = organization;
+  where organization_id = test_organization;
   select * into b_ledger from private.google_play_subscriptions
   where purchase_token_hash = token_b;
   if entitlement.current_purchase_token_hash is distinct from token_a
@@ -77,12 +77,12 @@ begin
   end if;
 
   perform public.service_record_google_play_subscription(
-    token_b, purchaser, organization, 'stokdas_pro', 'monthly',
+    token_b, purchaser, test_organization, 'stokdas_pro', 'monthly',
     'SUBSCRIPTION_STATE_ACTIVE', 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
     true, now(), b_expiry, true, true, order_b, account_hash, profile_hash
   );
   select * into entitlement from private.google_play_entitlements
-  where organization_id = organization;
+  where organization_id = test_organization;
   if entitlement.current_purchase_token_hash is distinct from token_a
      or not entitlement.entitled then
     raise exception 'Repeated refunded B displaced valid A';

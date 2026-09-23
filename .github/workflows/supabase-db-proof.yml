@@ -1,0 +1,118 @@
+name: Stokdaş Supabase DB proof
+
+on:
+  pull_request:
+    branches:
+      - main
+      - feat/google-play-lifecycle-reconcile-20260923
+    paths:
+      - 'supabase/schema.sql'
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - '.github/workflows/supabase-db-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  migration-and-refund:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3.0.0
+        with:
+          version: 2.117.0
+
+      - name: Replay baseline and migrations against local Supabase Postgres
+        run: |
+          cp supabase/schema.sql supabase/migrations/20260821000000_ci_baseline.sql
+          supabase db start
+
+      - name: Install PostgreSQL client if unavailable
+        run: |
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+
+      - name: Seed disposable admin and verify SQL contracts
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGDATABASE: postgres
+          PGPASSWORD: postgres
+        run: |
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare ci_user uuid := gen_random_uuid();
+          declare ci_org uuid := gen_random_uuid();
+          begin
+            insert into auth.users
+              (id, instance_id, aud, role, email, created_at, updated_at)
+            values (ci_user, '00000000-0000-0000-0000-000000000000',
+              'authenticated', 'authenticated',
+              'ci-' || ci_user::text || '@example.invalid', now(), now());
+            insert into public.organizations
+              (id, name, slug, subscription_status, trial_ends_at, created_by)
+            values (ci_org, 'CI Test Shop',
+              'ci-shop-' || substr(replace(ci_org::text, '-', ''), 1, 8),
+              'trial', now() + interval '14 days', ci_user);
+            insert into public.profiles
+              (id, username, display_name, role, organization_id)
+            values (ci_user,
+              'ci_' || substr(replace(ci_user::text, '-', ''), 1, 16),
+              'CI Admin', 'admin', ci_org);
+          end;
+          $$;
+
+          do $$
+          declare public_rpc regprocedure := to_regprocedure(
+            'public.service_record_google_play_subscription(text,uuid,uuid,text,text,text,text,boolean,timestamptz,timestamptz,boolean,boolean,text,text,text)');
+          declare core_rpc regprocedure := to_regprocedure(
+            'private.service_record_google_play_subscription_core(text,uuid,uuid,text,text,text,text,boolean,timestamptz,timestamptz,boolean,boolean,text,text,text)');
+          begin
+            if public_rpc is null or core_rpc is null then
+              raise exception 'Google Play RPC migration is missing';
+            end if;
+            if not has_function_privilege('service_role', public_rpc, 'EXECUTE')
+               or has_function_privilege('anon', public_rpc, 'EXECUTE')
+               or has_function_privilege('authenticated', public_rpc, 'EXECUTE')
+               or has_function_privilege('service_role', core_rpc, 'EXECUTE') then
+              raise exception 'Google Play RPC grant boundary changed';
+            end if;
+            if (to_regclass('private.google_play_token_replacements') is null)
+               <> (to_regclass('private.google_play_abandoned_tokens') is null) then
+              raise exception 'Google Play replacement tables are incomplete';
+            end if;
+            if exists (
+              select 1
+              from unnest(array[
+                'private.google_play_token_vault',
+                'private.google_play_observation_leases',
+                'private.google_play_voided_orders',
+                'private.google_play_void_scan_state'
+              ] || case
+                when to_regclass('private.google_play_token_replacements') is not null
+                  then array['private.google_play_token_replacements',
+                    'private.google_play_abandoned_tokens']
+                else array[]::text[] end) as t(name)
+              left join pg_class c on c.oid = to_regclass(t.name)
+              where c.oid is null or not c.relrowsecurity or not c.relforcerowsecurity
+                or has_table_privilege('anon', c.oid, 'SELECT')
+                or has_table_privilege('authenticated', c.oid, 'SELECT')
+                or has_table_privilege('service_role', c.oid, 'SELECT')
+            ) then
+              raise exception 'Google Play private table grant/RLS boundary changed';
+            end if;
+          end;
+          $$;
+          SQL
+
+          psql -X -v ON_ERROR_STOP=1 \
+            -f supabase/tests/google_play_refund_preserves_other_token.sql
