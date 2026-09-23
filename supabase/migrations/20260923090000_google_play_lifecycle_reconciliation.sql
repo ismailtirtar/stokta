@@ -133,6 +133,14 @@ revoke all on function private.service_record_google_play_subscription_core(
 do $$
 declare definition text;
 declare old_guard text := 'if caller.id is null then';
+declare old_initial_grant text := 'and p_activate_entitlement;';
+declare old_existing_grant text := 'and effective_activate_entitlement;';
+declare void_fence text := $fence$and not exists (
+      select 1 from private.google_play_voided_orders v
+      where v.purchase_token_hash = p_purchase_token_hash
+        and (v.order_id_hash = p_latest_order_id_hash
+          or p_latest_order_id_hash is null)
+    );$fence$;
 declare new_guard text := $guard$if caller.id is null and not exists (
     select 1 from private.google_play_subscriptions s
     where s.purchase_token_hash = p_purchase_token_hash
@@ -146,10 +154,22 @@ begin
   if definition is null
      or pg_catalog.length(definition) - pg_catalog.length(
        pg_catalog.replace(definition, old_guard, '')
-     ) <> pg_catalog.length(old_guard) then
-    raise exception 'Unexpected Google Play core owner guard; stop migration';
+     ) <> pg_catalog.length(old_guard)
+     or pg_catalog.length(definition) - pg_catalog.length(
+       pg_catalog.replace(definition, old_initial_grant, '')
+     ) <> pg_catalog.length(old_initial_grant)
+     or pg_catalog.length(definition) - pg_catalog.length(
+       pg_catalog.replace(definition, old_existing_grant, '')
+     ) <> pg_catalog.length(old_existing_grant) then
+    raise exception 'Unexpected Google Play core guard/fence anchors; stop migration';
   end if;
-  execute pg_catalog.replace(definition, old_guard, new_guard);
+  execute pg_catalog.replace(
+    pg_catalog.replace(
+      pg_catalog.replace(definition, old_guard, new_guard),
+      old_initial_grant, 'and p_activate_entitlement ' || void_fence
+    ),
+    old_existing_grant, 'and effective_activate_entitlement ' || void_fence
+  );
 end;
 $$;
 
@@ -169,6 +189,10 @@ declare organization_period_end timestamptz;
 declare play_entitled boolean;
 declare refunded_current_order boolean := false;
 begin
+  -- A void arriving before this token's first ledger row must serialize with
+  -- that insert; row locks alone cannot protect a row that does not exist.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_purchase_token_hash, 3073593::bigint));
   result := private.service_record_google_play_subscription_core(
     p_purchase_token_hash, p_user_id, p_organization_id,
     p_product_id, p_base_plan_id, p_subscription_state,
@@ -318,6 +342,8 @@ begin
     or p_event_time is null or p_event_time > now() + interval '1 day' then
     raise exception 'Geçersiz iade bildirimi' using errcode = '22023';
   end if;
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_token_hash, 3073593::bigint));
   select * into subscription from private.google_play_subscriptions
   where purchase_token_hash = p_token_hash for update;
   insert into private.google_play_voided_orders

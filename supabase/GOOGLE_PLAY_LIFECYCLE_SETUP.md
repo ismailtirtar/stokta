@@ -12,6 +12,10 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    Eski RPC imzasını, `service_role` dışındaki EXECUTE izinlerini, private
    tablolarda FORCE RLS'yi ve ilk satın alma ile mevcut token güncellemesini
    sınayın. Geçiş, beklenmeyen eski RPC gövdesinde bilinçli olarak hata verir.
+   Aktif bir test yöneticisiyle
+   `supabase/tests/google_play_refund_preserves_other_token.sql` senaryosunu
+   çalıştırın: önceden iade edilmiş daha uzun B dönemi geçerli A hakkını
+   devralmamalıdır.
 2. Supabase Edge secret'larını ekleyin:
    `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (mevcut Publisher servis hesabı),
    `GOOGLE_PLAY_TOKEN_ENCRYPTION_KEY` (tam 32 rastgele byte'ın standart
