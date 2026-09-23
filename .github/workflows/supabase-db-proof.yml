@@ -114,5 +114,6 @@ jobs:
           $$;
           SQL
 
-          psql -X -v ON_ERROR_STOP=1 \
-            -f supabase/tests/google_play_refund_preserves_other_token.sql
+          for proof_file in supabase/tests/google_play_*.sql; do
+            psql -X -v ON_ERROR_STOP=1 -f "$proof_file"
+          done
