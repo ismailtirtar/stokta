@@ -462,6 +462,60 @@ export class GooglePlayClient {
     mapPublisherError(response.status);
   }
 
+  async listVoidedPurchases(startTimeMillis: number, pageToken: string | null) {
+    if (!Number.isSafeInteger(startTimeMillis) || startTimeMillis < 0
+      || (pageToken !== null && (pageToken.length < 1 || pageToken.length > 4096))) {
+      throw new GooglePlayError("INVALID_REQUEST", 400, "İade tarama imleci geçersiz");
+    }
+    const url = new URL(
+      `${GOOGLE_ANDROID_PUBLISHER_ROOT}/applications/${encodeURIComponent(GOOGLE_PLAY_PACKAGE_NAME)}/purchases/voidedpurchases`,
+    );
+    url.searchParams.set("type", "1");
+    url.searchParams.set("pageSelection.maxResults", "100");
+    if (pageToken) url.searchParams.set("pageSelection.token", pageToken);
+    else url.searchParams.set("startTime", String(startTimeMillis));
+    const response = await fetchWithTimeout(url.toString(), {
+      method: "GET",
+      headers: { Authorization: `Bearer ${this.#accessToken}` },
+    });
+    if (!response.ok) mapPublisherError(response.status);
+    const raw = await parseJsonObject(response);
+    const entries = raw.voidedPurchases ?? [];
+    if (!Array.isArray(entries) || entries.length > 100
+      || (raw.tokenPagination !== undefined && !isRecord(raw.tokenPagination))) {
+      throw new GooglePlayError("INVALID_RESPONSE", 502, "İade listesi geçersiz");
+    }
+    const nextPageToken = isRecord(raw.tokenPagination)
+      ? raw.tokenPagination.nextPageToken : undefined;
+    if (nextPageToken !== undefined && nextPageToken !== null
+      && (typeof nextPageToken !== "string" || nextPageToken.length > 4096)) {
+      throw new GooglePlayError("INVALID_RESPONSE", 502, "İade imleci geçersiz");
+    }
+    const purchases = entries.map((entry) => {
+      if (!isRecord(entry)
+        || typeof entry.orderId !== "string"
+        || entry.orderId.length < 1 || entry.orderId.length > 256
+        || typeof entry.voidedTimeMillis !== "string"
+        || !/^\d{10,16}$/.test(entry.voidedTimeMillis)) {
+        throw new GooglePlayError("INVALID_RESPONSE", 502, "İade kaydı geçersiz");
+      }
+      const eventTime = Number(entry.voidedTimeMillis);
+      if (!Number.isSafeInteger(eventTime)) {
+        throw new GooglePlayError("INVALID_RESPONSE", 502, "İade zamanı geçersiz");
+      }
+      return {
+        purchaseToken: validateGooglePlayPurchaseToken(entry.purchaseToken),
+        orderId: entry.orderId,
+        eventTime: new Date(eventTime).toISOString(),
+      };
+    });
+    return {
+      purchases,
+      nextPageToken: typeof nextPageToken === "string" && nextPageToken
+        ? nextPageToken : null,
+    };
+  }
+
   private async getRawSubscription(purchaseToken: string) {
     const url = `${GOOGLE_ANDROID_PUBLISHER_ROOT}/applications/${
       encodeURIComponent(GOOGLE_PLAY_PACKAGE_NAME)

@@ -43,3 +43,9 @@ verify_jwt = true
 
 [functions.verify-play-subscription]
 verify_jwt = true
+
+[functions.google-play-rtdn]
+verify_jwt = false
+
+[functions.google-play-reconcile]
+verify_jwt = false

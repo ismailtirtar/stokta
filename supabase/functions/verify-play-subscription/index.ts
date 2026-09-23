@@ -1,14 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.112.3";
 import {
-  GooglePlayAcknowledgementState,
-  GooglePlayClient,
   GooglePlayError,
-  GOOGLE_PLAY_BASE_PLAN_ID,
   GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
-  VerifiedGooglePlaySubscription,
   validateGooglePlayPurchaseToken,
 } from "../_shared/google_play.ts";
+import { PlaySyncError, processGooglePlayToken } from "../_shared/google_play_sync.ts";
 import {
   bearerToken,
   corsJsonHeaders,
@@ -17,27 +14,12 @@ import {
   sha256,
 } from "../_shared/security.ts";
 
-const subscriptionStatuses = new Set([
-  "trial",
-  "active",
-  "inactive",
-  "past_due",
-  "suspended",
-  "canceled",
-]);
-
 type CallerProfile = {
   id: string;
   organization_id: string;
   role: "admin" | "member";
   is_active: boolean;
   must_change_password: boolean;
-};
-
-type LedgerResult = {
-  entitled: boolean;
-  subscriptionStatus: "trial" | "active" | "inactive" | "past_due" | "suspended" | "canceled";
-  currentPeriodEnd: string | null;
 };
 
 class LedgerError extends Error {
@@ -82,70 +64,6 @@ async function readBoundedJson(req: Request, maxBytes: number) {
   } catch {
     throw new LedgerError(400, "Geçersiz istek gövdesi");
   }
-}
-
-function validateLedgerResult(value: unknown): LedgerResult {
-  if (!isRecord(value)
-    || typeof value.entitled !== "boolean"
-    || typeof value.subscriptionStatus !== "string"
-    || !subscriptionStatuses.has(value.subscriptionStatus)
-    || (value.currentPeriodEnd !== null && typeof value.currentPeriodEnd !== "string")) {
-    throw new LedgerError(503, "Abonelik kaydı doğrulanamadı");
-  }
-  if (typeof value.currentPeriodEnd === "string"
-    && !Number.isFinite(Date.parse(value.currentPeriodEnd))) {
-    throw new LedgerError(503, "Abonelik kaydı doğrulanamadı");
-  }
-  return value as LedgerResult;
-}
-
-async function recordVerifiedSubscription(
-  admin: any,
-  caller: CallerProfile,
-  purchaseTokenHash: string,
-  externalAccountIdHash: string,
-  externalProfileIdHash: string,
-  verified: VerifiedGooglePlaySubscription,
-  acknowledgementState: GooglePlayAcknowledgementState,
-  activateEntitlement: boolean,
-) {
-  const latestOrderIdHash = verified.latestSuccessfulOrderId
-    ? await sha256(verified.latestSuccessfulOrderId)
-    : null;
-
-  const { data, error } = await admin.rpc("service_record_google_play_subscription", {
-    p_purchase_token_hash: purchaseTokenHash,
-    p_user_id: caller.id,
-    p_organization_id: caller.organization_id,
-    p_product_id: GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID,
-    p_base_plan_id: GOOGLE_PLAY_BASE_PLAN_ID,
-    p_subscription_state: verified.subscriptionState,
-    p_acknowledgement_state: acknowledgementState,
-    p_activate_entitlement: activateEntitlement,
-    p_google_verified_at: verified.verifiedAt,
-    p_expiry_time: verified.expiryTime,
-    p_auto_renew_enabled: verified.autoRenewEnabled,
-    p_is_test_purchase: verified.isTestPurchase,
-    p_latest_order_id_hash: latestOrderIdHash,
-    p_external_account_id_hash: externalAccountIdHash,
-    p_external_profile_id_hash: externalProfileIdHash,
-  });
-
-  if (error) {
-    const code = typeof error.code === "string" ? error.code : "unknown";
-    console.error("Google Play subscription ledger update failed", { code });
-    if (code === "23505") {
-      throw new LedgerError(409, "Google Play satın alma başka bir hesaba bağlı");
-    }
-    if (code === "22023") {
-      throw new LedgerError(400, "Google Play abonelik bilgisi geçersiz");
-    }
-    if (code === "42501") {
-      throw new LedgerError(403, "Bu işlem yalnızca işletme yöneticisine açıktır");
-    }
-    throw new LedgerError(503, "Abonelik kaydı şu anda güncellenemiyor");
-  }
-  return validateLedgerResult(data);
 }
 
 Deno.serve(async (req: Request) => {
@@ -195,7 +113,6 @@ Deno.serve(async (req: Request) => {
       return json(400, { error: "Desteklenmeyen Google Play aboneliği" });
     }
     const purchaseToken = validateGooglePlayPurchaseToken(body.purchaseToken);
-    const purchaseTokenHash = await sha256(purchaseToken);
 
     const rateKey = await sha256(`stokdas:google-play-verify:v1:${caller.id}`);
     const { data: allowed, error: rateError } = await admin.rpc("consume_auth_rate_limit", {
@@ -216,43 +133,18 @@ Deno.serve(async (req: Request) => {
 
     const externalAccountIdHash = await sha256(caller.id);
     const externalProfileIdHash = await sha256(caller.organization_id);
-    const googlePlay = await GooglePlayClient.fromEnvironment();
-    const verified = await googlePlay.verifySubscription(
-      purchaseToken,
-      externalAccountIdHash,
-      externalProfileIdHash,
-    );
-
-    let ledger = await recordVerifiedSubscription(
-      admin,
-      caller,
-      purchaseTokenHash,
-      externalAccountIdHash,
-      externalProfileIdHash,
-      verified,
-      verified.acknowledgementState,
-      verified.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
-    );
-
-    let acknowledged =
-      verified.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
-    if (verified.entitled && !acknowledged) {
-      // Reserve ownership before the external acknowledgement call, but do not
-      // grant entitlement yet. If the second ledger write fails, a retry reads
-      // Google's acknowledged state and safely completes local activation.
-      await googlePlay.acknowledgeSubscription(purchaseToken);
-      ledger = await recordVerifiedSubscription(
-        admin,
-        caller,
-        purchaseTokenHash,
-        externalAccountIdHash,
-        externalProfileIdHash,
-        verified,
-        "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
-        true,
-      );
-      acknowledged = true;
+    const result = await processGooglePlayToken(admin, purchaseToken, "verify", {
+      owner: {
+        userId: caller.id,
+        organizationId: caller.organization_id,
+        accountHash: externalAccountIdHash,
+        profileHash: externalProfileIdHash,
+      },
+    });
+    if (result.disposition !== "recorded") {
+      throw new LedgerError(503, "Abonelik kaydı doğrulanamadı");
     }
+    const { ledger, acknowledged } = result;
 
     return json(200, {
       store: "google",
@@ -270,6 +162,9 @@ Deno.serve(async (req: Request) => {
       return json(error.responseStatus, { error: error.message, code: error.code });
     }
     if (error instanceof LedgerError) {
+      return json(error.status, { error: error.message });
+    }
+    if (error instanceof PlaySyncError) {
       return json(error.status, { error: error.message });
     }
     console.error("Google Play subscription verification failed", {

@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "npm:@supabase/supabase-js@2.112.3": ["node_modules/@supabase/supabase-js/dist/index.d.mts"],
+      "jsr:@supabase/functions-js/edge-runtime.d.ts": ["supabase/functions/edge-runtime-local.d.ts"]
+    }
+  },
+  "include": [
+    "supabase/functions/verify-play-subscription/**/*.ts",
+    "supabase/functions/google-play-rtdn/**/*.ts",
+    "supabase/functions/google-play-reconcile/**/*.ts",
+    "supabase/functions/_shared/google_play*.ts",
+    "supabase/functions/_shared/security.ts",
+    "supabase/functions/edge-runtime-local.d.ts"
+  ]
+}

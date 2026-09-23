@@ -9,6 +9,7 @@
     "test": "node --test tests/*.test.mjs",
     "audit:production": "node scripts/verify-npm-audit.mjs",
     "typecheck": "tsc --noEmit",
+    "typecheck:edge": "tsc --project tsconfig.edge.json",
     "typecheck:strict": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
     "export:android": "expo export --platform android",
     "build:apk": "eas build --platform android --profile preview",
