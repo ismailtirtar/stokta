@@ -13,6 +13,7 @@ export type PlayOwner = {
   organizationId: string;
   accountHash: string;
   profileHash: string;
+  abandoned?: boolean;
 };
 
 export type PlayClaim = { leaseId: string; generation: number };
@@ -56,7 +57,8 @@ function validateOwner(value: unknown): PlayOwner {
   if (!isRecord(value) || !UUID.test(value.userId as string)
     || !UUID.test(value.organizationId as string)
     || !HASH.test(value.accountHash as string)
-    || !HASH.test(value.profileHash as string)) {
+    || !HASH.test(value.profileHash as string)
+    || (value.abandoned !== undefined && typeof value.abandoned !== "boolean")) {
     throw new PlaySyncError(503, "Abonelik sahibi doğrulanamadı");
   }
   return value as PlayOwner;
@@ -105,6 +107,9 @@ async function record(
       latestOrderIdHash,
       accountHash: owner.accountHash,
       profileHash: owner.profileHash,
+      predecessorTokenHash: verified.predecessorToken
+        ? await sha256(verified.predecessorToken) : null,
+      predecessorKind: verified.predecessorKind,
     },
     p_token_ciphertext: encrypted.tokenCiphertext,
     p_token_nonce: encrypted.tokenNonce,
@@ -134,7 +139,24 @@ export async function processGooglePlayToken(
 }> {
   const token = validateGooglePlayPurchaseToken(purchaseTokenValue);
   const tokenHash = await sha256(token);
-  const owner = options.owner ?? await getGooglePlayOwner(admin, tokenHash);
+  const recordedOwner = await getGooglePlayOwner(admin, tokenHash);
+  if (recordedOwner?.abandoned) {
+    if (mode === "verify") throw new PlaySyncError(409, "Satın alma geçersiz kılındı");
+    return { disposition: "unowned" };
+  }
+  if (options.owner && recordedOwner && !sameOwner(options.owner, recordedOwner)) {
+    throw new PlaySyncError(409, "Satın alma başka bir hesaba bağlı");
+  }
+  const googlePlay = options.googlePlay ?? await GooglePlayClient.fromEnvironment();
+  let owner = options.owner ?? recordedOwner;
+  if (owner === null || owner === undefined) {
+    const predecessor = await googlePlay.getSubscriptionPredecessor(token);
+    if (!predecessor) return { disposition: "unowned" };
+    if (predecessor.token === token) {
+      throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play abonelik bağlantısı geçersiz");
+    }
+    owner = await getGooglePlayOwner(admin, await sha256(predecessor.token));
+  }
   if (owner === null) {
     if (mode === "verify") throw new PlaySyncError(403, "Satın alma sahibi bulunamadı");
     return { disposition: "unowned" };
@@ -154,13 +176,25 @@ export async function processGooglePlayToken(
   }
 
   let completed = false;
+  let hasRecordedToken = recordedOwner !== null;
   try {
-    const googlePlay = options.googlePlay ?? await GooglePlayClient.fromEnvironment();
     const verify = async () => {
       try {
-        return await googlePlay.verifySubscription(
-          token, owner.accountHash, owner.profileHash,
+        const verified = await googlePlay.verifySubscription(
+          token, owner.accountHash, owner.profileHash, hasRecordedToken,
         );
+        if (verified.predecessorToken) {
+          if (verified.predecessorToken === token) {
+            throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play abonelik bağlantısı geçersiz");
+          }
+          const predecessorOwner = await getGooglePlayOwner(
+            admin, await sha256(verified.predecessorToken),
+          );
+          if (!predecessorOwner || !sameOwner(owner, predecessorOwner)) {
+            throw new PlaySyncError(409, "Önceki satın alma sahibi eşleşmiyor");
+          }
+        }
+        return verified;
       } catch (error) {
         if (error instanceof GooglePlayError
           && ["INVALID_PURCHASE", "IDENTITY_MISMATCH"].includes(error.code)) {
@@ -181,6 +215,7 @@ export async function processGooglePlayToken(
     };
     let verified = await verify();
     let ledger = await record(admin, owner, token, tokenHash, claim, verified);
+    hasRecordedToken = true;
 
     if (verified.entitled
       && verified.acknowledgementState === "ACKNOWLEDGEMENT_STATE_PENDING") {
@@ -210,6 +245,13 @@ export async function processGooglePlayToken(
       });
     }
   }
+}
+
+function sameOwner(first: PlayOwner, second: PlayOwner) {
+  return first.userId === second.userId
+    && first.organizationId === second.organizationId
+    && first.accountHash === second.accountHash
+    && first.profileHash === second.profileHash;
 }
 
 export function transientPlayFailure(error: unknown) {

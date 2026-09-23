@@ -25,6 +25,38 @@ create table private.google_play_observation_leases (
   updated_at timestamptz not null default now()
 );
 
+-- A Google-signed replacement is bound to the prior token's immutable ledger
+-- owner by the observation RPC. Hash fences survive individual ledger-row
+-- deletion; they disappear only with the owning profile/organization.
+create table private.google_play_token_replacements (
+  old_token_hash text primary key check (old_token_hash ~ '^[a-f0-9]{64}$'),
+  new_token_hash text not null unique check (new_token_hash ~ '^[a-f0-9]{64}$'),
+  purchaser_user_id uuid not null,
+  organization_id uuid not null,
+  predecessor_kind text not null check (predecessor_kind in ('linked', 'expired')),
+  activated_at timestamptz,
+  created_at timestamptz not null default now(),
+  check (old_token_hash <> new_token_hash),
+  foreign key (purchaser_user_id, organization_id)
+    references public.profiles (id, organization_id)
+    on delete cascade,
+  foreign key (organization_id) references public.organizations (id)
+    on delete cascade
+);
+
+-- A canceled PENDING predecessor can be replaced by a later valid sibling.
+-- The abandoned token remains fenced if its ledger row is deleted separately.
+create table private.google_play_abandoned_tokens (
+  purchase_token_hash text primary key check (purchase_token_hash ~ '^[a-f0-9]{64}$'),
+  purchaser_user_id uuid not null,
+  organization_id uuid not null,
+  abandoned_at timestamptz not null default now(),
+  foreign key (purchaser_user_id, organization_id)
+    references public.profiles (id, organization_id) on delete cascade,
+  foreign key (organization_id) references public.organizations (id)
+    on delete cascade
+);
+
 create table private.google_play_voided_orders (
   purchase_token_hash text not null check (purchase_token_hash ~ '^[a-f0-9]{64}$'),
   order_id_hash text not null check (order_id_hash ~ '^[a-f0-9]{64}$'),
@@ -47,12 +79,18 @@ alter table private.google_play_token_vault enable row level security;
 alter table private.google_play_token_vault force row level security;
 alter table private.google_play_observation_leases enable row level security;
 alter table private.google_play_observation_leases force row level security;
+alter table private.google_play_token_replacements enable row level security;
+alter table private.google_play_token_replacements force row level security;
+alter table private.google_play_abandoned_tokens enable row level security;
+alter table private.google_play_abandoned_tokens force row level security;
 alter table private.google_play_voided_orders enable row level security;
 alter table private.google_play_voided_orders force row level security;
 alter table private.google_play_void_scan_state enable row level security;
 alter table private.google_play_void_scan_state force row level security;
 revoke all on table private.google_play_token_vault,
   private.google_play_observation_leases,
+  private.google_play_token_replacements,
+  private.google_play_abandoned_tokens,
   private.google_play_voided_orders,
   private.google_play_void_scan_state
   from public, anon, authenticated, service_role;
@@ -106,7 +144,11 @@ begin
     'userId', subscription.purchaser_user_id,
     'organizationId', subscription.organization_id,
     'accountHash', subscription.external_account_id_hash,
-    'profileHash', subscription.external_profile_id_hash
+    'profileHash', subscription.external_profile_id_hash,
+    'abandoned', exists (
+      select 1 from private.google_play_abandoned_tokens a
+      where a.purchase_token_hash = p_token_hash
+    )
   );
 end;
 $$;
@@ -138,6 +180,11 @@ declare new_guard text := $guard$if caller.id is null and not exists (
     where s.purchase_token_hash = p_purchase_token_hash
       and s.purchaser_user_id = p_user_id
       and s.organization_id = p_organization_id
+  ) and not exists (
+    select 1 from private.google_play_token_replacements r
+    where r.new_token_hash = p_purchase_token_hash
+      and r.purchaser_user_id = p_user_id
+      and r.organization_id = p_organization_id
   ) then$guard$;
 begin
   select pg_catalog.pg_get_functiondef(
@@ -169,6 +216,31 @@ declare organization_period_end timestamptz;
 declare play_entitled boolean;
 declare refunded_current_order boolean := false;
 begin
+  -- A permanently replaced token is a no-op. Lock its ledger row first so a
+  -- concurrent new-token activation cannot commit between this check and the
+  -- old core grant. Never let the core temporarily promote this token over an
+  -- unrelated, valid subscription in the same organization.
+  perform 1 from private.google_play_subscriptions s
+  where s.purchase_token_hash = p_purchase_token_hash for update;
+  if exists (
+    select 1 from private.google_play_token_replacements r
+    where r.old_token_hash = p_purchase_token_hash
+      and r.activated_at is not null
+  ) or exists (
+    select 1 from private.google_play_abandoned_tokens a
+    where a.purchase_token_hash = p_purchase_token_hash
+  ) then
+    select jsonb_build_object(
+      'entitled', coalesce(e.entitled and e.current_period_end > now()
+        and o.subscription_status <> 'suspended', false),
+      'subscriptionStatus', o.subscription_status,
+      'currentPeriodEnd', o.current_period_end
+    ) into result
+    from public.organizations o
+    left join private.google_play_entitlements e on e.organization_id = o.id
+    where o.id = p_organization_id;
+    return result;
+  end if;
   result := private.service_record_google_play_subscription_core(
     p_purchase_token_hash, p_user_id, p_organization_id,
     p_product_id, p_base_plan_id, p_subscription_state,
@@ -260,7 +332,16 @@ create function public.service_record_google_play_observation(
   p_token_ciphertext text, p_token_nonce text
 ) returns jsonb language plpgsql security definer set search_path = '' as $$
 declare token_hash text := p_observation->>'purchaseTokenHash';
+declare predecessor_hash text := p_observation->>'predecessorTokenHash';
+declare claimed_predecessor_hash text := p_observation->>'predecessorTokenHash';
+declare predecessor_kind text := p_observation->>'predecessorKind';
 declare lease private.google_play_observation_leases;
+declare predecessor private.google_play_subscriptions;
+declare successor private.google_play_subscriptions;
+declare replacement private.google_play_token_replacements;
+declare prior_replacement private.google_play_token_replacements;
+declare abandoned private.google_play_subscriptions;
+declare web_until timestamptz;
 declare result jsonb;
 begin
   if p_observation is null or jsonb_typeof(p_observation) <> 'object'
@@ -268,7 +349,12 @@ begin
      or p_token_ciphertext is null or length(p_token_ciphertext) not between 24 and 8192
      or p_token_ciphertext !~ '^[A-Za-z0-9+/]+={0,2}$'
      or p_token_nonce is null or length(p_token_nonce) not between 16 and 32
-     or p_token_nonce !~ '^[A-Za-z0-9+/]+={0,2}$' then
+     or p_token_nonce !~ '^[A-Za-z0-9+/]+={0,2}$'
+     or (predecessor_hash is not null and (
+       predecessor_hash !~ '^[a-f0-9]{64}$' or predecessor_hash = token_hash
+       or predecessor_kind is null
+       or predecessor_kind not in ('linked', 'expired')
+     )) or (predecessor_hash is null and predecessor_kind is not null) then
     raise exception 'Geçersiz Google Play gözlemi' using errcode = '22023';
   end if;
   select * into lease from private.google_play_observation_leases
@@ -277,6 +363,92 @@ begin
      or lease.generation is distinct from p_generation
      or lease.expires_at <= now() then
     raise exception 'Google Play gözlem süresi doldu' using errcode = '55P03';
+  end if;
+  if predecessor_hash is null then
+    select r.old_token_hash into predecessor_hash
+    from private.google_play_token_replacements r
+    where r.new_token_hash = token_hash;
+  end if;
+  if predecessor_hash is not null then
+    select * into predecessor from private.google_play_subscriptions
+    where purchase_token_hash = predecessor_hash for update;
+    if predecessor.purchase_token_hash is null
+      or predecessor.purchaser_user_id is distinct from
+        (p_observation->>'userId')::uuid
+      or predecessor.organization_id is distinct from
+        (p_observation->>'organizationId')::uuid
+      or predecessor.external_account_id_hash is distinct from
+        p_observation->>'accountHash'
+      or predecessor.external_profile_id_hash is distinct from
+        p_observation->>'profileHash' then
+      raise exception 'Önceki satın alma sahibi eşleşmiyor' using errcode = '23505';
+    end if;
+    if claimed_predecessor_hash is not null then
+      select * into prior_replacement
+      from private.google_play_token_replacements
+      where old_token_hash = predecessor_hash for update;
+      if prior_replacement.old_token_hash is not null
+         and prior_replacement.new_token_hash <> token_hash then
+        select * into abandoned from private.google_play_subscriptions
+        where purchase_token_hash = prior_replacement.new_token_hash for update;
+        -- Rebind only a sibling that never became a paid entitlement and was
+        -- conclusively canceled (or expired without any successful order).
+        -- Retain its hash in a permanent fence so a late Publisher response
+        -- cannot later revive it, including after a direct ledger-row delete.
+        if prior_replacement.activated_at is not null
+           or prior_replacement.purchaser_user_id <> predecessor.purchaser_user_id
+           or prior_replacement.organization_id <> predecessor.organization_id
+           or abandoned.purchase_token_hash is null
+           or (abandoned.purchase_token_hash is not null and (
+             abandoned.entitled
+             or abandoned.acknowledgement_state <> 'ACKNOWLEDGEMENT_STATE_PENDING'
+             or abandoned.latest_order_id_hash is not null
+             or abandoned.subscription_state not in (
+               'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+               'SUBSCRIPTION_STATE_EXPIRED'
+             )
+           ))
+           or exists (
+             select 1 from private.google_play_entitlements e
+             where e.current_purchase_token_hash = prior_replacement.new_token_hash
+           )
+           or exists (
+             select 1 from private.google_play_token_replacements r
+             where r.old_token_hash = prior_replacement.new_token_hash
+           ) then
+          raise exception 'Bekleyen Google Play aboneliği değiştirilemez'
+            using errcode = '23505';
+        end if;
+        insert into private.google_play_abandoned_tokens
+          (purchase_token_hash, purchaser_user_id, organization_id)
+        values (prior_replacement.new_token_hash,
+          predecessor.purchaser_user_id, predecessor.organization_id);
+        delete from private.google_play_token_replacements
+        where old_token_hash = predecessor_hash;
+      end if;
+      insert into private.google_play_token_replacements
+        (old_token_hash, new_token_hash, purchaser_user_id, organization_id,
+         predecessor_kind)
+      values (predecessor_hash, token_hash, predecessor.purchaser_user_id,
+        predecessor.organization_id, predecessor_kind)
+      on conflict (old_token_hash) do nothing;
+    end if;
+  end if;
+  select * into replacement from private.google_play_token_replacements
+  where new_token_hash = token_hash for update;
+  if claimed_predecessor_hash is not null and (
+      replacement.old_token_hash is distinct from predecessor_hash
+      or replacement.predecessor_kind is distinct from predecessor_kind
+    ) then
+    raise exception 'Google Play abonelik bağlantısı değişti' using errcode = '23505';
+  end if;
+  if replacement.new_token_hash is not null and (
+      replacement.purchaser_user_id is distinct from
+        (p_observation->>'userId')::uuid
+      or replacement.organization_id is distinct from
+        (p_observation->>'organizationId')::uuid
+    ) then
+    raise exception 'Google Play abonelik sahibi değişti' using errcode = '23505';
   end if;
   result := public.service_record_google_play_subscription(
     token_hash, (p_observation->>'userId')::uuid,
@@ -292,6 +464,75 @@ begin
     p_observation->>'latestOrderIdHash',
     p_observation->>'accountHash', p_observation->>'profileHash'
   );
+  if replacement.new_token_hash is not null then
+    select * into successor from private.google_play_subscriptions
+    where purchase_token_hash = token_hash for update;
+    -- A linked PENDING transaction leaves the old entitlement intact. Once
+    -- Google reports a completed (non-PENDING) replacement, the old token is
+    -- invalid even if the new purchase still awaits acknowledgement; that
+    -- brief interval is intentionally fail-closed. A Play Store out-of-app
+    -- purchase proves the old subscription already expired.
+    if replacement.activated_at is not null
+       or replacement.predecessor_kind = 'expired'
+       or successor.subscription_state in (
+         'SUBSCRIPTION_STATE_ACTIVE',
+         'SUBSCRIPTION_STATE_IN_GRACE_PERIOD',
+         'SUBSCRIPTION_STATE_CANCELED',
+         'SUBSCRIPTION_STATE_ON_HOLD',
+         'SUBSCRIPTION_STATE_PAUSED'
+       )
+       or (successor.subscription_state = 'SUBSCRIPTION_STATE_EXPIRED'
+         and (successor.acknowledgement_state = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'
+           or successor.latest_order_id_hash is not null)) then
+      -- The core's grant gate only sees a new token if its expiry won the
+      -- existing entitlement comparison. A forced replacement must satisfy
+      -- the identical recent refund-sweep gate before moving the pointer.
+      if successor.entitled and successor.expiry_time > now() and not exists (
+        select 1 from private.google_play_void_scan_state v
+        where v.singleton = true and v.page_token is null
+          and v.last_completed_at > now() - interval '15 minutes'
+      ) then
+        raise exception 'Google Play refund scan is not current' using errcode = '55000';
+      end if;
+      update private.google_play_token_replacements
+      set activated_at = coalesce(activated_at, now())
+      where old_token_hash = replacement.old_token_hash;
+      update private.google_play_subscriptions set entitled = false
+      where purchase_token_hash = replacement.old_token_hash;
+      update private.google_play_entitlements e
+      set current_purchase_token_hash = successor.purchase_token_hash,
+          purchaser_user_id = successor.purchaser_user_id,
+          subscription_state = successor.subscription_state,
+          entitled = successor.entitled and successor.expiry_time > now(),
+          current_period_end = successor.expiry_time,
+          updated_at = now()
+      where e.organization_id = successor.organization_id
+        and e.current_purchase_token_hash in (
+          replacement.old_token_hash, successor.purchase_token_hash
+        );
+      if found then
+        perform 1 from public.organizations
+        where id = successor.organization_id for update;
+        select max(activated_until) into web_until
+        from public.web_payment_notifications
+        where organization_id = successor.organization_id and status = 'approved'
+          and activated_until > now();
+        update public.organizations
+        set subscription_status = case
+              when subscription_status = 'suspended' then 'suspended'
+              when successor.entitled and successor.expiry_time > now() then 'active'
+              when web_until > now() then 'active' else 'past_due' end,
+            current_period_end = case
+              when successor.entitled and successor.expiry_time > now()
+                then greatest(successor.expiry_time, coalesce(web_until,
+                  successor.expiry_time))
+              when web_until > now() then web_until
+              else coalesce(successor.expiry_time, now()) end,
+            updated_at = now()
+        where id = successor.organization_id;
+      end if;
+    end if;
+  end if;
   insert into private.google_play_token_vault
     (purchase_token_hash, token_ciphertext, token_nonce, key_version,
      reconcile_after, failure_count, last_success_at, updated_at)
@@ -303,6 +544,15 @@ begin
       key_version = 1,
       reconcile_after = excluded.reconcile_after,
       failure_count = 0, last_success_at = now(), updated_at = now();
+  select jsonb_build_object(
+    'entitled', coalesce(e.entitled and e.current_period_end > now()
+      and o.subscription_status <> 'suspended', false),
+    'subscriptionStatus', o.subscription_status,
+    'currentPeriodEnd', o.current_period_end
+  ) into result
+  from public.organizations o
+  left join private.google_play_entitlements e on e.organization_id = o.id
+  where o.id = (p_observation->>'organizationId')::uuid;
   return result;
 end;
 $$;
@@ -404,6 +654,10 @@ begin
     from private.google_play_token_vault v
     join private.google_play_subscriptions s using (purchase_token_hash)
     where v.reconcile_after <= now()
+      and not exists (
+        select 1 from private.google_play_abandoned_tokens a
+        where a.purchase_token_hash = v.purchase_token_hash
+      )
     order by v.reconcile_after, v.purchase_token_hash
     limit p_limit * 3
   loop

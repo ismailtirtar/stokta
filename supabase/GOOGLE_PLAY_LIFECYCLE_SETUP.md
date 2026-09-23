@@ -11,7 +11,11 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    boş/izole veritabanında mevcut tüm migration zincirinden sonra çalıştırın.
    Eski RPC imzasını, `service_role` dışındaki EXECUTE izinlerini, private
    tablolarda FORCE RLS'yi ve ilk satın alma ile mevcut token güncellemesini
-   sınayın. Geçiş, beklenmeyen eski RPC gövdesinde bilinçli olarak hata verir.
+   sınayın. Ayrıca eski token → yeni token devri, ACK öncesi/sırası yarış,
+   terk edilmiş bekleyen tokenın tekrar hak açmaması, bağımsız başka geçerli
+   aboneliğin korunması ve profil/kuruluş silinmesinde kasa ile ilişki
+   özetlerinin cascade temizliğini sınayın. Geçiş, beklenmeyen eski RPC
+   gövdesinde bilinçli olarak hata verir.
 2. Supabase Edge secret'larını ekleyin:
    `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (mevcut Publisher servis hesabı),
    `GOOGLE_PLAY_TOKEN_ENCRYPTION_KEY` (tam 32 rastgele byte'ın standart
@@ -62,21 +66,22 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    topic boş. Test notification gönderin; handler 204 dönmeli ve hak
    değişmemeli.
 8. Önce Play lisans test hesabıyla satın alma/ACK ve restore, ardından
-   yenileme, dönem sonu iptal, grace/hold, iade edilen son sipariş, eski
-   döneme ait iade, Pub/Sub yeniden teslimatı ve onaylı IBAN dönemi
+   yenileme, dönem sonu iptal, grace/hold, süresi dolmuş aboneliğin uygulama
+   ve Play Store üzerinden yeniden alınması, bekleyen alımın iptali sonrası
+   tekrar deneme, iade edilen son sipariş, eski döneme ait iade, Pub/Sub
+   yeniden teslimatı ve onaylı IBAN dönemi
    senaryolarını sınayın. Her senaryoda Google API durumu, private ledger,
    kuruluş erişimi ve `service_google_play_lifecycle_health()` çıktısını
    karşılaştırın. Operatör TOTP/AAL2 ve normal yönetici/çalışan girişlerini
    ayrıca kontrol edin.
 9. **Açık test yayın kapısı:** Play Console taban planında “Yeniden abone ol”
-   şu an “İzin ver”. `linkedPurchaseToken` ve
-   `outOfAppPurchaseContext.expiredPurchaseToken` içeren yeni tokenlar bu
-   sürümde güvenli hesap devri kurulamadığından 409 ile reddedilir; yeni
-   ücretli işlem ACK alamayabilir. Yeni token devri Google tarafından
-   doğrulanmış eski token sahipliğiyle uygulama+SQL düzeyinde test edilmeden
-   veya Play Console'da bu akışların tümünün engellendiği (hold/erken tekrar
-   alım dahil) gerçek satın alma testleriyle doğrulanmadan dağıtmayın.
-   “Yeniden abone ol” seçeneğini tek başına kapatmak yeterli kabul edilmez.
+   şu an “İzin ver”. Bu dal, Google'ın `linkedPurchaseToken` ve
+   `outOfAppPurchaseContext.expiredPurchaseToken` alanlarını eski tokenın
+   değişmez ledger sahibiyle eşleştirip yeni tokenı yalnız aynı kullanıcı ve
+   işletmeye bağlar; ACK öncesinde ilişkiyi kaydeder, ardından Google'dan
+   tekrar okur. Eski token ve başarısız bekleyen kardeş tokenlar hash çitiyle
+   kalıcı olarak grant dışında tutulur. İzole SQL transaction/yetki/silme
+   provası ve gerçek Play lisans testleri geçmeden bu kodu canlıya dağıtmayın.
 
 ## Çalışma ve sınırlar
 
@@ -86,13 +91,18 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
   token/bozuk mesaj için verilir; geçici Google/veritabanı hatası 503 ile
   yeniden teslimata bırakılır.
 - İlk satın almada mobil uygulamanın mevcut doğrulama isteği kayıt sahipliğini
-  oluşturur. Bundan önce gelen bilinmeyen RTDN tokenı erişim açmaz ve 204 ile
-  bırakılır. İstemci callback'i hiç ulaşmazsa satın alma ACK edilmez; kullanıcı
-  uygulamadan `Satın alımları geri yükle` yolunu kullanmalıdır. Bu durumu
-  bir test satın alımında özellikle gözlemleyin.
+  oluşturur. Bilinmeyen RTDN tokenında Google doğrulanmış önceki tokenı
+  döndürürse önceki ledger sahibine aynı kullanıcı/işletme/kimlik özetleriyle
+  bağlanabilir; önceki ledger yoksa hak veya ACK açmadan 204 ile bırakılır.
+  Sıfırdan alımda istemci callback'i hiç ulaşmazsa satın alma ACK edilmez;
+  kullanıcı uygulamadan `Satın alımları geri yükle` yolunu kullanmalıdır.
+  Bu durumu bir test satın alımında özellikle gözlemleyin.
 - Ham purchase token yalnız AES-GCM şifreli olarak `private` kasada durur.
   Kasa kaydı otomatik süre sonunda silinmez; ilgili abonelik ledger satırı
-  silinirse FK ile birlikte silinir. Ledger kuruluş/profil silinmesine bağlıdır,
+  silinirse FK ile birlikte silinir. Yerine-geçme ve terk edilmiş token hash
+  çitleri tekil ledger silinmesinde korunur, profil/kuruluş silinmesinde
+  cascade ile silinir; bu hash çitlerine otomatik süre temizliği uygulanmaz.
+  Ledger kuruluş/profil silinmesine bağlıdır,
   fakat bu değişiklik hesap silme iş akışı veya ayrıca bir saklama süresi
   eklemez. İade çitindeki token/sipariş SHA-256 özetleri ve gözlem kilidi
   özetleri için de otomatik temizleme yoktur. Mobil hesap metni ve gizlilik

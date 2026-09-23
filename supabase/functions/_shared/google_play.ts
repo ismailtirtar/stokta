@@ -54,6 +54,13 @@ export type VerifiedGooglePlaySubscription = {
   isTestPurchase: boolean;
   latestSuccessfulOrderId: string | null;
   entitled: boolean;
+  predecessorToken: string | null;
+  predecessorKind: "linked" | "expired" | null;
+};
+
+export type GooglePlayPredecessor = {
+  token: string;
+  kind: "linked" | "expired";
 };
 
 export type GooglePlayErrorCode =
@@ -231,11 +238,12 @@ function normalizedTimestamp(value: unknown, required: boolean) {
   return { iso: new Date(milliseconds).toISOString(), milliseconds };
 }
 
-function validateSubscriptionResponse(
+export function validateSubscriptionResponse(
   raw: Record<string, unknown>,
   expectedAccountId: string,
   expectedProfileId: string,
   nowMilliseconds: number,
+  allowKnownTokenWithoutIdentifiers: boolean,
 ): VerifiedGooglePlaySubscription {
   validateHash(expectedAccountId, "Hesap özeti");
   validateHash(expectedProfileId, "İşletme özeti");
@@ -253,29 +261,29 @@ function validateSubscriptionResponse(
   }
   const acknowledgementState = acknowledgementValue as GooglePlayAcknowledgementState;
 
-  if (raw.linkedPurchaseToken !== undefined && raw.linkedPurchaseToken !== null) {
-    // This first release has one immutable base plan and no token-replacement
-    // flow. A linked token must be reconciled against the private ledger before
-    // it can ever affect entitlement; rejecting here leaves current access
-    // unchanged.
-    throw new GooglePlayError(
-      "INVALID_PURCHASE",
-      409,
-      "Bağlantılı Google Play aboneliği henüz desteklenmiyor",
-    );
-  }
-  if (raw.outOfAppPurchaseContext !== undefined && raw.outOfAppPurchaseContext !== null) {
-    throw new GooglePlayError(
-      "INVALID_PURCHASE",
-      409,
-      "Google Play üzerinden yeniden abonelik henüz desteklenmiyor",
-    );
-  }
+  const predecessor = parsePredecessor(raw);
 
   const externalIdentifiers = raw.externalAccountIdentifiers;
-  if (!isRecord(externalIdentifiers)
-    || externalIdentifiers.obfuscatedExternalAccountId !== expectedAccountId
-    || externalIdentifiers.obfuscatedExternalProfileId !== expectedProfileId) {
+  if (predecessor?.kind === "expired") {
+    const expiredIdentifiers = (raw.outOfAppPurchaseContext as Record<string, unknown>)
+      .expiredExternalAccountIdentifiers;
+    if (expiredIdentifiers !== undefined && expiredIdentifiers !== null
+      && (!isRecord(expiredIdentifiers)
+        || expiredIdentifiers.obfuscatedExternalAccountId !== expectedAccountId
+        || expiredIdentifiers.obfuscatedExternalProfileId !== expectedProfileId)) {
+      throw new GooglePlayError("IDENTITY_MISMATCH", 403, "Google Play satın alma kimliği eşleşmiyor");
+    }
+  }
+  if (externalIdentifiers !== undefined && externalIdentifiers !== null) {
+    if (!isRecord(externalIdentifiers)
+      || externalIdentifiers.obfuscatedExternalAccountId !== expectedAccountId
+      || externalIdentifiers.obfuscatedExternalProfileId !== expectedProfileId) {
+      throw new GooglePlayError("IDENTITY_MISMATCH", 403, "Google Play satın alma kimliği eşleşmiyor");
+    }
+  } else if (predecessor?.kind === "expired") {
+    // The predecessor's immutable ledger owner is checked before any write or
+    // acknowledgement. Google removes this context after acknowledgement.
+  } else if (!allowKnownTokenWithoutIdentifiers && predecessor?.kind !== "linked") {
     throw new GooglePlayError("IDENTITY_MISMATCH", 403, "Google Play satın alma kimliği eşleşmiyor");
   }
 
@@ -334,7 +342,33 @@ function validateSubscriptionResponse(
     isTestPurchase: testPurchase !== undefined && testPurchase !== null,
     latestSuccessfulOrderId: typeof orderId === "string" ? orderId : null,
     entitled,
+    predecessorToken: predecessor?.token ?? null,
+    predecessorKind: predecessor?.kind ?? null,
   };
+}
+
+function parsePredecessor(raw: Record<string, unknown>): GooglePlayPredecessor | null {
+  const linked = raw.linkedPurchaseToken;
+  const outOfApp = raw.outOfAppPurchaseContext;
+  if (linked !== undefined && linked !== null) {
+    if (outOfApp !== undefined && outOfApp !== null) {
+      throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play bağlantısı belirsiz");
+    }
+    return { token: validatePublisherToken(linked), kind: "linked" };
+  }
+  if (outOfApp === undefined || outOfApp === null) return null;
+  if (!isRecord(outOfApp)) {
+    throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play yeniden abonelik bilgisi geçersiz");
+  }
+  return { token: validatePublisherToken(outOfApp.expiredPurchaseToken), kind: "expired" };
+}
+
+function validatePublisherToken(value: unknown) {
+  try {
+    return validateGooglePlayPurchaseToken(value);
+  } catch {
+    throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play önceki abonelik anahtarı geçersiz");
+  }
 }
 
 export class GooglePlayClient {
@@ -423,6 +457,7 @@ export class GooglePlayClient {
     purchaseTokenValue: unknown,
     expectedAccountId: string,
     expectedProfileId: string,
+    allowKnownTokenWithoutIdentifiers = false,
   ) {
     const purchaseToken = validateGooglePlayPurchaseToken(purchaseTokenValue);
     const raw = await this.getRawSubscription(purchaseToken);
@@ -431,7 +466,13 @@ export class GooglePlayClient {
       expectedAccountId,
       expectedProfileId,
       Date.now(),
+      allowKnownTokenWithoutIdentifiers,
     );
+  }
+
+  async getSubscriptionPredecessor(purchaseTokenValue: unknown) {
+    const raw = await this.getRawSubscription(validateGooglePlayPurchaseToken(purchaseTokenValue));
+    return parsePredecessor(raw);
   }
 
   async acknowledgeSubscription(purchaseTokenValue: unknown) {
