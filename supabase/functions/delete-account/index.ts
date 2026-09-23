@@ -67,6 +67,31 @@ Deno.serve(async (req: Request) => {
     if (!callerEmail || currentPassword.length < 1 || currentPassword.length > 72) {
       return json(400, { error: "Hesabı silmek için mevcut şifrenizi girin" });
     }
+    // These records have RESTRICT links to both the tenant and the submitting
+    // profile. Stop before banning users, revoking sessions, or deleting data.
+    // Their lawful retention and eventual deletion need a separate workflow.
+    const paymentRecordColumn = caller.role === "admin" ? "organization_id" : "submitted_by";
+    const paymentRecordId = caller.role === "admin" ? caller.organization_id : caller.id;
+    const { data: paymentRecord, error: paymentRecordError } = await admin
+      .from("web_payment_notifications")
+      .select("id")
+      .eq(paymentRecordColumn, paymentRecordId)
+      .limit(1)
+      .maybeSingle();
+    if (paymentRecordError) {
+      console.error("Account deletion payment record check failed", {
+        code: typeof paymentRecordError.code === "string" ? paymentRecordError.code : "unknown",
+      });
+      return json(503, { error: "Ödeme kayıtları doğrulanamadı. Lütfen daha sonra tekrar deneyin." });
+    }
+    if (paymentRecord) {
+      return json(409, {
+        code: "PAYMENT_RECORDS_REQUIRE_REVIEW",
+        error: "Bu hesapla ilişkili ödeme bildirimleri var. Hesap ve veri silme talebinizi tirtarismail@gmail.com adresine iletin.",
+        supportEmail: "tirtarismail@gmail.com",
+      });
+    }
+
     const reauthClient = createClient(supabaseUrl, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
