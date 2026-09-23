@@ -71,22 +71,6 @@ jobs:
           end;
           $$;
 
-          select t.name, c.relrowsecurity, c.relforcerowsecurity,
-            has_table_privilege('anon', c.oid, 'SELECT') as anon_select,
-            has_table_privilege('authenticated', c.oid, 'SELECT') as authenticated_select,
-            has_table_privilege('service_role', c.oid, 'SELECT') as service_role_select,
-            has_schema_privilege('service_role', 'private', 'USAGE') as service_private_usage,
-            c.relacl
-          from unnest(array[
-            'private.google_play_token_vault',
-            'private.google_play_observation_leases',
-            'private.google_play_token_replacements',
-            'private.google_play_abandoned_tokens',
-            'private.google_play_voided_orders',
-            'private.google_play_void_scan_state'
-          ]) as t(name)
-          left join pg_class c on c.oid = to_regclass(t.name);
-
           do $$
           declare public_rpc regprocedure := to_regprocedure(
             'public.service_record_google_play_subscription(text,uuid,uuid,text,text,text,text,boolean,timestamptz,timestamptz,boolean,boolean,text,text,text)');
@@ -102,16 +86,22 @@ jobs:
                or has_function_privilege('service_role', core_rpc, 'EXECUTE') then
               raise exception 'Google Play RPC grant boundary changed';
             end if;
+            if (to_regclass('private.google_play_token_replacements') is null)
+               <> (to_regclass('private.google_play_abandoned_tokens') is null) then
+              raise exception 'Google Play replacement tables are incomplete';
+            end if;
             if exists (
               select 1
               from unnest(array[
                 'private.google_play_token_vault',
                 'private.google_play_observation_leases',
-                'private.google_play_token_replacements',
-                'private.google_play_abandoned_tokens',
                 'private.google_play_voided_orders',
                 'private.google_play_void_scan_state'
-              ]) as t(name)
+              ] || case
+                when to_regclass('private.google_play_token_replacements') is not null
+                  then array['private.google_play_token_replacements',
+                    'private.google_play_abandoned_tokens']
+                else array[]::text[] end) as t(name)
               left join pg_class c on c.oid = to_regclass(t.name)
               where c.oid is null or not c.relrowsecurity or not c.relforcerowsecurity
                 or has_table_privilege('anon', c.oid, 'SELECT')
