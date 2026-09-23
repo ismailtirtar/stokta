@@ -20,6 +20,7 @@ import {
 const subscriptionStatuses = new Set([
   "trial",
   "active",
+  "inactive",
   "past_due",
   "suspended",
   "canceled",
@@ -35,7 +36,7 @@ type CallerProfile = {
 
 type LedgerResult = {
   entitled: boolean;
-  subscriptionStatus: "trial" | "active" | "past_due" | "suspended" | "canceled";
+  subscriptionStatus: "trial" | "active" | "inactive" | "past_due" | "suspended" | "canceled";
   currentPeriodEnd: string | null;
 };
 
