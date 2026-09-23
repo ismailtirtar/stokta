@@ -364,6 +364,7 @@ function NativeSubscriptionModal({
   const statusDetail = subscriptionStatusDetail(subscriptionLabel, trialEndsAt, currentPeriodEnd);
   const currentPeriodExpired = Boolean(currentPeriodEnd) && new Date(currentPeriodEnd ?? 0).getTime() <= Date.now();
   const canStartNewPurchase = subscriptionLabel === "Deneme"
+    || subscriptionLabel === "İnaktif"
     || subscriptionLabel === "İptal edildi"
     || (subscriptionLabel === "Aktif" && (!currentPeriodEnd || currentPeriodExpired));
 
@@ -467,7 +468,7 @@ function NativeSubscriptionModal({
                 ? <ActivityIndicator color="#356b54" />
                 : <Text style={styles.restoreButtonText}>Satın alımları geri yükle</Text>}
             </Pressable>
-            {["Aktif", "Ödeme bekliyor", "Askıda"].includes(subscriptionLabel) ? <Pressable
+            {["Aktif", "İnaktif", "Ödeme bekliyor", "Askıda"].includes(subscriptionLabel) ? <Pressable
               style={styles.manageButton}
               onPress={() => void openPlaySubscriptionManagement()}
               accessibilityRole="link"
