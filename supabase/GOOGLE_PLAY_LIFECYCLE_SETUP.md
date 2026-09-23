@@ -5,21 +5,13 @@ Bu değişiklik mevcut Android `{ purchaseToken, productId }` isteğini ve
 Edge Functions, Pub/Sub ve zamanlayıcı ayrı adımlardır. Yalnız kaynak kodun
 birleştirilmesi yaşam döngüsünü etkinleştirmez.
 
-## Dağıtım sırası
+## Hazırlık ve dağıtım sırası
 
-1. `20260923090000_google_play_lifecycle_reconciliation.sql` geçişini önce
+1. `20260923090000_google_play_lifecycle_reconciliation.sql` geçişini
    boş/izole veritabanında mevcut tüm migration zincirinden sonra çalıştırın.
    Eski RPC imzasını, `service_role` dışındaki EXECUTE izinlerini, private
    tablolarda FORCE RLS'yi ve ilk satın alma ile mevcut token güncellemesini
    sınayın. Geçiş, beklenmeyen eski RPC gövdesinde bilinçli olarak hata verir.
-   Canlı geçişte iade taraması tam ve son 15 dakika içinde başarılı olana
-   kadar Play hak açma çağrıları bilinçli olarak 503 döner. Mevcut hakların
-   süresi değişmez; yeni satın alma/yenileme doğrulaması bu sürede gecikir.
-   Sırları, topic/subscription'ı ve zamanlayıcıyı geçişten önce hazırlayın;
-   geçiş sonrası hemen taramayı başlatıp çok sayfalı tarama bitene dek tekrar
-   çağırın. Sağlık çıktısında `voidLastCompletedAt` dolmadan canlı
-   doğrulamayı tamamlanmış saymayın. Kesintisiz yeni satın alma garantisi
-   için ayrıca aşamalı veri geçişi gerekir; bu sürümün dağıtım kapısıdır.
 2. Supabase Edge secret'larını ekleyin:
    `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (mevcut Publisher servis hesabı),
    `GOOGLE_PLAY_TOKEN_ENCRYPTION_KEY` (tam 32 rastgele byte'ın standart
@@ -30,11 +22,11 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    (`projects/PROJECT/subscriptions/SUBSCRIPTION` tam yolu). Sırları repoya,
    Cron SQL metnine veya loglara yazmayın. Şifreleme anahtarını, kasa kayıtları
    var oldukça saklayın; anahtar rotasyonu yeni sürüm/migrasyon gerektirir.
-3. `verify-play-subscription`, `google-play-rtdn` ve
-   `google-play-reconcile` Edge Function'larını kaynak sürümüyle dağıtın.
-   İlk fonksiyon Supabase JWT gerektirir. Diğer ikisi gateway JWT doğrulamasını
-   kapatır ve kendi Google OIDC / gizli bearer kontrolünü yapar. Eksik/yanlış
-   kimlikle 401, bozuk yapılandırmada 503 yanıtını test edin.
+3. `google-play-rtdn` ve `google-play-reconcile` Edge Function'larını
+   kaynak sürümüyle dağıtın; henüz Play topic yayınını ve zamanlayıcıyı
+   etkinleştirmeyin. Bunlar gateway JWT doğrulamasını kapatır, kendi Google
+   OIDC / gizli bearer kontrolünü yapar. Eksik/yanlış kimlikle 401,
+   bozuk yapılandırmada 503 yanıtını test edin.
 4. Google Cloud Pub/Sub topic oluşturup
    `google-play-developer-notifications@system.gserviceaccount.com` hesabına
    yalnız bu topic için Pub/Sub Publisher verin. Kimliği doğrulanmış push
@@ -42,12 +34,14 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    audience yukarıdaki secret'larla birebir eşleşsin. Pub/Sub service agent'a
    bu servis hesabı için OIDC token oluşturma yetkisi verin. Push ack deadline
    90 saniye, retry ve dead-letter topic (ör. 20 başarısız teslimat) kurun;
-   teslim edilmeyen mesajlar ile dead-letter sayısını izleyin.
-5. Play Console > Monetization setup > Real-time developer notifications:
-   abonelik/ürün bildirimlerini etkinleştirip topic'in
-   `projects/PROJECT/topics/TOPIC` yolunu girin. Şu an kutu kapalı ve topic
-   boş olduğundan bu adım zorunlu. Test notification gönderin; handler test
-   mesajını 204 ile kabul etmeli ve veritabanında hak değişmemeli.
+   teslim edilmeyen mesajlar ile dead-letter sayısını izleyin. Play Console
+   RTDN ayarını ilk iade taraması bitene kadar etkinleştirmeyin.
+5. İzole prova ve diğer yayın kapıları geçince canlı migration'ı uygulayın.
+   İade taraması tam ve son 15 dakika içinde başarılı olana kadar Play hak
+   açma çağrıları 503 döner. Mevcut hakların süresi değişmez; yeni satın alma
+   doğrulaması bu sürede gecikir. Tarama için hemen adım 6'yı tamamlayın.
+   Kesintisiz yeni satın alma garantisi için ayrı aşamalı veri geçişi gerekir;
+   bu sürümün dağıtım kapısıdır.
 6. Tek bir `stokdas-google-play-reconcile` zamanlayıcısı kurun; her 5
    dakikada bir `POST /functions/v1/google-play-reconcile` çağırmalı.
    `Authorization: Bearer <GOOGLE_PLAY_RECONCILE_SECRET>` değerini Supabase
@@ -58,15 +52,23 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    tokenları durdurmadan ertelenir. `service_google_play_lifecycle_health()`
    içindeki `voidLastCompletedAt` 10 dakikadan eskiyse uyarın (15 dakikada
    Play grant kapanır); `overdueCount` ve `failedDueCount` artışlarını ve
-   `unvaultedCount` başlangıç değerini izleyin.
-7. Önce Play lisans test hesabıyla satın alma/ACK ve restore, ardından
+   `unvaultedCount` başlangıç değerini izleyin. İlk 29 günlük taramayı hemen
+   elle tetikleyin; çok sayfalıysa son sayfaya kadar tekrarlayın.
+   `voidLastCompletedAt` dolmadan yeni hak doğrulamasını tamamlanmış saymayın.
+7. `verify-play-subscription` Edge Function'ını kaynak sürümüyle dağıtın;
+   Supabase JWT gerektirir. Play Console > Monetization setup > Real-time
+   developer notifications ayarında abonelik/ürün bildirimlerini etkinleştirip
+   topic'in `projects/PROJECT/topics/TOPIC` yolunu girin. Şu an kutu kapalı ve
+   topic boş. Test notification gönderin; handler 204 dönmeli ve hak
+   değişmemeli.
+8. Önce Play lisans test hesabıyla satın alma/ACK ve restore, ardından
    yenileme, dönem sonu iptal, grace/hold, iade edilen son sipariş, eski
    döneme ait iade, Pub/Sub yeniden teslimatı ve onaylı IBAN dönemi
    senaryolarını sınayın. Her senaryoda Google API durumu, private ledger,
    kuruluş erişimi ve `service_google_play_lifecycle_health()` çıktısını
    karşılaştırın. Operatör TOTP/AAL2 ve normal yönetici/çalışan girişlerini
    ayrıca kontrol edin.
-8. **Açık test yayın kapısı:** Play Console taban planında “Yeniden abone ol”
+9. **Açık test yayın kapısı:** Play Console taban planında “Yeniden abone ol”
    şu an “İzin ver”. `linkedPurchaseToken` ve
    `outOfAppPurchaseContext.expiredPurchaseToken` içeren yeni tokenlar bu
    sürümde güvenli hesap devri kurulamadığından 409 ile reddedilir; yeni
@@ -89,6 +91,12 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
   uygulamadan `Satın alımları geri yükle` yolunu kullanmalıdır. Bu durumu
   bir test satın alımında özellikle gözlemleyin.
 - Ham purchase token yalnız AES-GCM şifreli olarak `private` kasada durur.
+  Kasa kaydı otomatik süre sonunda silinmez; ilgili abonelik ledger satırı
+  silinirse FK ile birlikte silinir. Ledger kuruluş/profil silinmesine bağlıdır,
+  fakat bu değişiklik hesap silme iş akışı veya ayrıca bir saklama süresi
+  eklemez. İade çitindeki token/sipariş SHA-256 özetleri ve gözlem kilidi
+  özetleri için de otomatik temizleme yoktur. Mobil hesap metni ve gizlilik
+  politikası bu gerçek durumu yansıtmadan dağıtıma geçmeyin.
   Eski hash-only kayıtlar RTDN veya mobil geri yükleme geldiğinde kasaya
   eklenir; hash'ten geriye token çıkarılamaz. Sağlık çıktısındaki
   `unvaultedCount` sıfıra yaklaşana kadar bu hesaplarda periyodik sorgu
@@ -102,7 +110,12 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
   Google API daha eski void kayıtlarını getiremez.
 - `suspended` hesaplar otomatik açılmaz. Mevcut 7 günlük inaktif dönemin
   sonundaki askı ve idari askı aynı alanı kullandığından otomatik reaktivasyon
-  ayrı bir ürün/veri modeli kararı gerektirir.
+  ayrı bir ürün/veri modeli kararı gerektirir. Play HOLD/PAUSED/PENDING
+  durumları `past_due` olur ve Play hakkı kapanır; mevcut cron bunları yedi
+  gün sonra `suspended` yapmaz. Aynı token Google'da iyileşip ACTIVE/ACK
+  olursa tekrar açılabilir. Geçerli onaylı IBAN dönemi Play HOLD sırasında
+  da korunur. HOLD için ayrıca 7 günlük otomatik askı isteniyorsa idari ve
+  fatura kaynaklı askı nedenlerini ayıran yeni şema/test gerekir.
 - İade edilen son Google siparişi için onaylı IBAN dönemi varsa işletmenin
   bitişi o IBAN tarihine indirilir; iade edilmiş Google dönemi hakkı uzatmaz.
 

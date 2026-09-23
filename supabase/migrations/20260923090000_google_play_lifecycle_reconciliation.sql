@@ -520,45 +520,6 @@ begin
 end;
 $$;
 
--- The existing fifteen-minute cron calls this function by name. HOLD and
--- PAUSED set past_due in the unchanged Play core; include those expired or
--- undated periods in the established seven-day IBAN grace flow.
-create or replace function private.refresh_expired_organization_statuses()
-returns jsonb language plpgsql security definer set search_path = '' as $$
-declare inactive_count integer := 0;
-declare suspended_count integer := 0;
-begin
-  update public.organizations
-  set subscription_status = 'inactive',
-      inactive_since = case
-        when subscription_status = 'trial' then trial_ends_at
-        else coalesce(current_period_end, now())
-      end,
-      updated_at = now()
-  where (subscription_status = 'trial'
-      and trial_ends_at is not null and trial_ends_at <= now())
-    or (subscription_status = 'active'
-      and current_period_end is not null and current_period_end <= now())
-    or (subscription_status = 'past_due'
-      and (current_period_end is null or current_period_end <= now()));
-  get diagnostics inactive_count = row_count;
-
-  update public.organizations as organization
-  set subscription_status = 'suspended', updated_at = now()
-  where organization.subscription_status = 'inactive'
-    and organization.inactive_since <= now() - interval '7 days'
-    and not exists (
-      select 1 from public.web_payment_notifications as notification
-      where notification.organization_id = organization.id
-        and notification.status = 'pending'
-    );
-  get diagnostics suspended_count = row_count;
-
-  return jsonb_build_object('inactive_count', inactive_count,
-    'suspended_count', suspended_count, 'processed_at', now());
-end;
-$$;
-
 revoke all on function public.service_claim_google_play_observation(text),
   public.service_release_google_play_observation(text,uuid),
   public.service_get_google_play_owner(text),
