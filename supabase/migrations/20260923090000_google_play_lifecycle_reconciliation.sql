@@ -364,6 +364,17 @@ begin
      or lease.expires_at <= now() then
     raise exception 'Google Play gözlem süresi doldu' using errcode = '55P03';
   end if;
+  -- Serialize an in-flight observation with a sibling rebind. The rebind
+  -- locks the old pending ledger row before writing the permanent abandoned
+  -- fence; a request that started before that fence must check again here.
+  perform 1 from private.google_play_subscriptions
+  where purchase_token_hash = token_hash for update;
+  perform 1 from private.google_play_abandoned_tokens
+  where purchase_token_hash = token_hash for update;
+  if found then
+    raise exception 'Terk edilmiş Google Play satın alımı'
+      using errcode = '23505';
+  end if;
   if predecessor_hash is null then
     select r.old_token_hash into predecessor_hash
     from private.google_play_token_replacements r
@@ -470,10 +481,10 @@ begin
     -- A linked PENDING transaction leaves the old entitlement intact. Once
     -- Google reports a completed (non-PENDING) replacement, the old token is
     -- invalid even if the new purchase still awaits acknowledgement; that
-    -- brief interval is intentionally fail-closed. A Play Store out-of-app
-    -- purchase proves the old subscription already expired.
+    -- brief interval is intentionally fail-closed. An out-of-app predecessor
+    -- is already expired, but a pending new purchase must remain replaceable
+    -- if Google later cancels it without any successful order.
     if replacement.activated_at is not null
-       or replacement.predecessor_kind = 'expired'
        or successor.subscription_state in (
          'SUBSCRIPTION_STATE_ACTIVE',
          'SUBSCRIPTION_STATE_IN_GRACE_PERIOD',

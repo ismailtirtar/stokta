@@ -102,6 +102,10 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
   silinirse FK ile birlikte silinir. Yerine-geçme ve terk edilmiş token hash
   çitleri tekil ledger silinmesinde korunur, profil/kuruluş silinmesinde
   cascade ile silinir; bu hash çitlerine otomatik süre temizliği uygulanmaz.
+  Etkin bir aboneliğin önceki tokenına ait ledger satırını elle tek başına
+  silmeyin: yeni tokenın sonraki uzlaştırması önceki sahipliği yeniden
+  doğrulayamaz. Olağan hesap/işletme silme işlemi ilişkili satırları birlikte
+  temizlemelidir; bunu izole veritabanında ayrıca sınayın.
   Ledger kuruluş/profil silinmesine bağlıdır,
   fakat bu değişiklik hesap silme iş akışı veya ayrıca bir saklama süresi
   eklemez. İade çitindeki token/sipariş SHA-256 özetleri ve gözlem kilidi
