@@ -80,8 +80,10 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    Kısa doğrulama duraklamasını ve istemcinin geri yükleme yolunu lisans
    hesabıyla test edin. Son tam tarama <10 dakika iken
    `select public.service_activate_google_play_lifecycle();` işlemini
-   yetkili service rolüyle bir kez çalıştırın; `lifecycleActive=true`
-   sonucunu doğrulayın. Eski RPC'nin `FOR SHARE` durum kilidi, aktivasyonun
+   yetkili service rolüyle bir kez çalıştırın. İşlem ilk taramada önceden
+   kaydedilmiş ve hâlâ güncel hakkı tutan iade olaylarını tam tarama altında
+   yeniden değerlendirir; geçerli bağımsız A hakkını ancak o zaman geri seçer.
+   `lifecycleActive=true` sonucunu doğrulayın. Eski RPC'nin `FOR SHARE` durum kilidi, aktivasyonun
    eski veritabanı işlemleri bitmeden geçmesini engeller.
    Sonra Play Console > Monetization setup > Real-time developer
    notifications ayarında abonelik/ürün bildirimlerini etkinleştirip
@@ -121,10 +123,12 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
   satın alımın geri yüklenmesi ayrıca doğrulanmalıdır. Kesintisiz/sıfır risk
   vaadi yoktur.
 - Son sipariş kimliği Google'da boşsa tokena ait herhangi bir iade
-  konservatif olarak güncel hakkı kapatır. Daha uzun B hakkı iade edilince,
-  tam/güncel taramadan doğrulanabilen bağımsız A hakkı yeniden seçilir.
-  A satırı eşzamanlı işlem nedeniyle kilitliyse fail-closed olarak atlanır;
-  sonraki iade taraması veya token uzlaştırması toparlamalıdır.
+  konservatif olarak güncel hakkı kapatır. İlk çok sayfalı taramada B hakkı
+  iade edilmişse geçerli A'yı hemen seçmez; A'nın iadesi sonraki sayfada
+  olabilir. Tam tarama sonrası aktivasyon B'nin iadesini yeniden işleyip
+  iadeden muaf A'yı seçer. Bu arada A'nın erişimi gecikebilir. Aktivasyon
+  sonrası A satırı eşzamanlı işlem nedeniyle kilitliyse fail-closed olarak
+  atlanır; sonraki iade taraması veya token uzlaştırması toparlamalıdır.
 - RTDN bir durum kararı değildir: handler Google'ın
   `purchases.subscriptionsv2.get` yanıtını ve hesap/ürün/plan eşleşmesini
   yeniden doğrular. Pub/Sub 2xx yanıtı yalnız başarılı işleme veya bilinmeyen

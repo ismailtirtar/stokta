@@ -271,7 +271,7 @@ begin
      and not exists (
        select 1 from private.google_play_void_scan_state v
        where v.singleton = true and v.page_token is null
-         and v.last_completed_at > now() - interval '10 minutes'
+         and v.last_completed_at > pg_catalog.clock_timestamp() - interval '10 minutes'
      ) then
     raise exception 'Google Play refund scan is not current' using errcode = '55000';
   end if;
@@ -320,7 +320,7 @@ begin
   ) and not exists (
     select 1 from private.google_play_void_scan_state v
     where v.singleton = true and v.page_token is null
-      and v.last_completed_at > now() - interval '15 minutes'
+      and v.last_completed_at > pg_catalog.clock_timestamp() - interval '15 minutes'
   ) then
     raise exception 'Google Play refund scan is not current' using errcode = '55000';
   end if;
@@ -573,7 +573,7 @@ begin
       if successor.entitled and successor.expiry_time > now() and not exists (
         select 1 from private.google_play_void_scan_state v
         where v.singleton = true and v.page_token is null
-          and v.last_completed_at > now() - interval '15 minutes'
+          and v.last_completed_at > pg_catalog.clock_timestamp() - interval '15 minutes'
       ) then
         raise exception 'Google Play refund scan is not current' using errcode = '55000';
       end if;
@@ -646,7 +646,14 @@ create function public.service_record_google_play_void(
 declare subscription private.google_play_subscriptions;
 declare fallback_subscription private.google_play_subscriptions;
 declare web_until timestamptz;
+declare lifecycle_active boolean;
 begin
+  -- The activation transaction waits for a refund already in progress.
+  select active into lifecycle_active from private.google_play_lifecycle_activation
+  where singleton = true for share;
+  if lifecycle_active is null then
+    raise exception 'Google Play lifecycle state is missing' using errcode = '55000';
+  end if;
   if p_token_hash is null or p_token_hash !~ '^[a-f0-9]{64}$'
     or p_order_hash is null or p_order_hash !~ '^[a-f0-9]{64}$'
     or p_event_time is null or p_event_time > now() + interval '1 day' then
@@ -693,7 +700,7 @@ begin
       and exists (
         select 1 from private.google_play_void_scan_state scan
         where scan.singleton = true and scan.page_token is null
-          and scan.last_completed_at > now() - interval '15 minutes'
+          and scan.last_completed_at > pg_catalog.clock_timestamp() - interval '15 minutes'
       )
       and not exists (
         select 1 from private.google_play_voided_orders v
@@ -749,7 +756,13 @@ create function public.service_disable_google_play_token(
 ) returns boolean language plpgsql security definer set search_path = '' as $$
 declare subscription private.google_play_subscriptions;
 declare web_until timestamptz;
+declare lifecycle_active boolean;
 begin
+  select active into lifecycle_active from private.google_play_lifecycle_activation
+  where singleton = true for share;
+  if lifecycle_active is distinct from true then
+    raise exception 'Google Play lifecycle is not active' using errcode = '55000';
+  end if;
   select * into subscription from private.google_play_subscriptions
   where purchase_token_hash = p_token_hash for update;
   if subscription.purchase_token_hash is null
@@ -893,8 +906,10 @@ $$;
 
 create function public.service_activate_google_play_lifecycle()
 returns boolean language plpgsql security definer set search_path = '' as $$
+declare refunded record;
 begin
-  -- This row lock waits for every old-RPC transaction that saw inactive mode.
+  -- This row lock waits for every old-RPC/void transaction that saw inactive
+  -- mode. It also prevents a new one from starting during the final replay.
   perform 1 from private.google_play_lifecycle_activation
   where singleton = true for update;
   if not found then
@@ -903,12 +918,40 @@ begin
   if not exists (
     select 1 from private.google_play_void_scan_state v
     where v.singleton = true and v.page_token is null
-      and v.last_completed_at > now() - interval '10 minutes'
+      and v.last_completed_at > pg_catalog.clock_timestamp() - interval '10 minutes'
   ) then
     raise exception 'Google Play refund scan is not current' using errcode = '55000';
   end if;
+
+  -- An early page of the first sweep can revoke a current B token before a
+  -- valid independent A is safe to re-elect. Once every page is recorded,
+  -- replay those exact voids under the activation lock to restore A before
+  -- switching on the common grant gate.
+  for refunded in
+    select distinct on (v.purchase_token_hash)
+      v.purchase_token_hash, v.order_id_hash, v.event_time
+    from private.google_play_voided_orders v
+    join private.google_play_subscriptions s
+      on s.purchase_token_hash = v.purchase_token_hash
+    join private.google_play_entitlements e
+      on e.current_purchase_token_hash = v.purchase_token_hash
+    where s.latest_order_id_hash = v.order_id_hash
+       or s.latest_order_id_hash is null
+    order by v.purchase_token_hash, v.event_time desc, v.order_id_hash desc
+  loop
+    perform public.service_record_google_play_void(
+      refunded.purchase_token_hash, refunded.order_id_hash, refunded.event_time);
+  end loop;
+
+  if not exists (
+    select 1 from private.google_play_void_scan_state v
+    where v.singleton = true and v.page_token is null
+      and v.last_completed_at > pg_catalog.clock_timestamp() - interval '10 minutes'
+  ) then
+    raise exception 'Google Play refund scan became stale' using errcode = '55000';
+  end if;
   update private.google_play_lifecycle_activation
-  set active = true, activated_at = coalesce(activated_at, now())
+  set active = true, activated_at = coalesce(activated_at, pg_catalog.clock_timestamp())
   where singleton = true;
   return true;
 end;
