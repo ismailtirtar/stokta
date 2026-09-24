@@ -8,6 +8,7 @@ on:
       - 'supabase/schema.sql'
       - 'supabase/migrations/**'
       - 'tests/account-deletion-payment-db.sql'
+      - 'tests/account-deletion-payment-race.sh'
       - '.github/workflows/account-deletion-db-proof.yml'
   workflow_dispatch:
 
@@ -47,3 +48,13 @@ jobs:
           PGDATABASE: postgres
           PGPASSWORD: postgres
         run: psql -X -v ON_ERROR_STOP=1 -f tests/account-deletion-payment-db.sql
+
+      - name: Prove both concurrent payment and deletion lock orders
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 54322
+          PGUSER: postgres
+          PGDATABASE: postgres
+          PGPASSWORD: postgres
+          DISPOSABLE_DB: YES
+        run: bash tests/account-deletion-payment-race.sh
