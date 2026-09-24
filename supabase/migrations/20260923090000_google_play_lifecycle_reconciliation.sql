@@ -892,7 +892,7 @@ end;
 $$;
 
 create function public.service_activate_google_play_lifecycle()
-returns boolean language plpgsql security definer set search_path = '' as $
+returns boolean language plpgsql security definer set search_path = '' as $$
 begin
   -- This row lock waits for every old-RPC transaction that saw inactive mode.
   perform 1 from private.google_play_lifecycle_activation
@@ -912,7 +912,7 @@ begin
   where singleton = true;
   return true;
 end;
-$;
+$$;
 
 create function public.service_google_play_lifecycle_health()
 returns jsonb language plpgsql security definer set search_path = '' as $$
