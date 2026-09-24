@@ -26,9 +26,23 @@ declare
   v_pdf_import uuid;
   v_notice uuid;
   v_result jsonb;
+  v_member_batch uuid;
+  v_admin_batch uuid;
   v_failed boolean := false;
   v_suffix text := replace(gen_random_uuid()::text, '-', '');
 begin
+  if has_table_privilege('authenticated', 'private.account_deletion_auth_jobs', 'SELECT')
+     or has_function_privilege('authenticated',
+       'public.service_list_account_deletion_auth_jobs(uuid)', 'EXECUTE')
+     or has_function_privilege('authenticated',
+       'public.service_complete_account_deletion_auth_job(uuid,uuid)', 'EXECUTE')
+     or has_function_privilege('authenticated',
+       'public.service_account_deletion_auth_job_health()', 'EXECUTE')
+     or not has_function_privilege('service_role',
+       'public.service_list_account_deletion_auth_jobs(uuid)', 'EXECUTE') then
+    raise exception 'Auth outbox privileges are not restricted to the service role';
+  end if;
+
   insert into auth.users (
     id, instance_id, aud, role, email, encrypted_password,
     email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data
@@ -102,8 +116,12 @@ begin
 
   delete from public.web_payment_notifications where id = v_notice;
   v_result := public.service_delete_account_data(v_member);
+  v_member_batch := (v_result->>'batchId')::uuid;
   if v_result->>'deleted' <> 'true'
      or v_result->>'scope' <> 'account'
+     or not exists (select 1 from private.account_deletion_auth_jobs
+                    where batch_id = v_member_batch and auth_user_id = v_member
+                      and kind = 'identity')
      or exists (select 1 from public.profiles where id = v_member)
      or not exists (select 1 from private.pdf_stock_imports
                     where id = v_pdf_import and actor_id is null
@@ -112,6 +130,16 @@ begin
                     where product_id = v_product and actor_id is null
                       and actor_name = 'Silinmiş kullanıcı') then
     raise exception 'No-notice member cleanup failed: %', v_result;
+  end if;
+  if not public.service_fail_account_deletion_auth_job(v_member_batch, v_member, 'fixture_error')
+     or not exists (select 1 from private.account_deletion_auth_jobs
+                    where batch_id = v_member_batch and attempts = 1
+                      and last_error_code = 'fixture_error')
+     or (public.service_account_deletion_auth_job_health()->>'withFailures')::integer < 1
+     or not public.service_complete_account_deletion_auth_job(v_member_batch, v_member)
+     or public.service_complete_account_deletion_auth_job(v_member_batch, v_member)
+     or jsonb_array_length(public.service_list_account_deletion_auth_jobs(v_member_batch)) <> 0 then
+    raise exception 'Auth outbox retry or idempotent completion failed';
   end if;
 
   begin
@@ -128,14 +156,18 @@ begin
      or not exists (select 1 from public.profiles where id = v_admin)
      or not exists (select 1 from public.products where id = v_product)
      or not exists (select 1 from public.stock_movements where product_id = v_product)
-     or not exists (select 1 from private.pdf_stock_imports where id = v_pdf_import) then
+     or not exists (select 1 from private.pdf_stock_imports where id = v_pdf_import)
+     or exists (select 1 from private.account_deletion_auth_jobs where auth_user_id = v_admin) then
     raise exception 'Database cleanup did not roll back as one transaction';
   end if;
 
   execute 'drop trigger reject_test_product_delete on public.products';
   v_result := public.service_delete_account_data(v_admin);
+  v_admin_batch := (v_result->>'batchId')::uuid;
   if v_result->>'deleted' <> 'true'
      or v_result->>'scope' <> 'organization'
+     or not exists (select 1 from private.account_deletion_auth_jobs
+                    where batch_id = v_admin_batch and auth_user_id = v_admin)
      or exists (select 1 from public.organizations where id = v_organization)
      or exists (select 1 from public.profiles where organization_id = v_organization)
      or exists (select 1 from public.products where id = v_product)
