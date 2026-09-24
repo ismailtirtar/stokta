@@ -58,3 +58,6 @@ jobs:
           PGPASSWORD: postgres
           DISPOSABLE_DB: YES
         run: bash tests/account-deletion-payment-race.sh
+
+      - name: Prove Edge response and Auth outbox retry contract
+        run: node --test tests/account-deletion-payment-guard.test.mjs
