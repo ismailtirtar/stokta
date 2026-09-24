@@ -16,6 +16,9 @@ function edgeHarness(deletionResult, {
   verificationUserId = null,
   absentUserIds = [],
   verificationMetadata = null,
+  banUserError = null,
+  revokeUserSessionsError = null,
+  lookupFailureIds = [],
 } = {}) {
   const events = [];
   const jobs = deletionResult.data?.batchId
@@ -35,6 +38,7 @@ function edgeHarness(deletionResult, {
   }]));
   for (const userId of absentUserIds) authUsers.delete(userId);
   let currentDeleteUserError = deleteUserError;
+  let attemptClock = 0;
   let handler;
   const caller = {
     id: "user-1",
@@ -51,7 +55,7 @@ function edgeHarness(deletionResult, {
         ? { data: { user: { id: caller.id, email: "user@example.test" } }, error: null }
         : { data: { user: null }, error: { code: "invalid_token" } },
       admin: {
-        updateUserById: async (id) => { events.push(`ban:${id}`); return { error: null }; },
+        updateUserById: async (id) => { events.push(`ban:${id}`); return { error: banUserError }; },
         deleteUser: async (id) => {
           events.push(`delete-auth:${id}`);
           if (currentDeleteUserError) return { error: currentDeleteUserError };
@@ -60,6 +64,9 @@ function edgeHarness(deletionResult, {
         },
         getUserById: async (id) => {
           events.push(`lookup-auth:${id}`);
+          if (lookupFailureIds.includes(id)) {
+            return { data: { user: null }, error: { status: 503, code: "auth_unavailable" } };
+          }
           if (id === verificationUserId && verificationLookupError) {
             return { data: { user: null }, error: verificationLookupError };
           }
@@ -74,9 +81,11 @@ function edgeHarness(deletionResult, {
         return { data: true, error: null };
       }
       if (name === "service_delete_account_data") return deletionResult;
-      if (name === "service_revoke_user_sessions") return { data: 1, error: null };
+      if (name === "service_revoke_user_sessions") return { data: 1, error: revokeUserSessionsError };
       if (name === "service_list_account_deletion_auth_jobs") {
-        return { data: jobs.filter((job) => !params.p_batch_id || job.batchId === params.p_batch_id).slice(0, 25), error: null };
+        return { data: jobs.filter((job) => !params.p_batch_id || job.batchId === params.p_batch_id)
+          .sort((left, right) => (left.lastAttemptAt ?? -1) - (right.lastAttemptAt ?? -1))
+          .slice(0, 25), error: null };
       }
       if (name === "service_complete_account_deletion_auth_job") {
         const index = jobs.findIndex((job) => job.batchId === params.p_batch_id && job.authUserId === params.p_auth_user_id);
@@ -88,6 +97,7 @@ function edgeHarness(deletionResult, {
         if (job) {
           job.attempts = (job.attempts ?? 0) + 1;
           job.lastErrorCode = params.p_error_code;
+          job.lastAttemptAt = ++attemptClock;
         }
         return { data: true, error: null };
       }
@@ -255,6 +265,34 @@ test("operator retry resumes an interrupted deletion in bounded pages", async ()
   assert.equal(harness.events.includes("rpc:service_delete_account_data"), false);
 });
 
+test("persistent failures rotate behind untouched outbox jobs", async () => {
+  const authUserIds = Array.from({ length: 30 }, (_, index) => `user-${index}`);
+  const harness = edgeHarness({
+    data: { deleted: true, scope: "organization", batchId: "batch-1" }, error: null,
+  }, { authUserIds, lookupFailureIds: authUserIds.slice(0, 25) });
+  const first = await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key");
+  assert.equal(first.status, 503);
+  assert.equal(first.body.health.pending, 30);
+  const second = await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key");
+  assert.equal(second.status, 503);
+  assert.equal(second.body.health.pending, 25);
+  assert.ok(harness.events.includes("delete-auth:user-25"));
+});
+
+test("failed ban, session revocation and Auth delete never acknowledge a job", async () => {
+  const { response, jobs } = await runEdge({
+    data: { deleted: true, scope: "account", batchId: "batch-1" }, error: null,
+  }, {
+    banUserError: { code: "auth_unavailable" },
+    revokeUserSessionsError: { code: "database_unavailable" },
+    deleteUserError: { code: "auth_unavailable" },
+  });
+  assert.equal(response.status, 503);
+  assert.equal(response.body.code, "AUTH_CLEANUP_PENDING");
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].attempts, 1);
+});
+
 test("SQL serializes payment INSERTs with its guard and rolls back database cleanup together", () => {
   const tenantLock = migration.indexOf("where id = v_organization_id for update;");
   const paymentGuard = migration.indexOf("if v_payment_state is not null then");
@@ -267,5 +305,6 @@ test("SQL serializes payment INSERTs with its guard and rolls back database clea
   assert.match(migration, /create table private\.account_deletion_auth_jobs[\s\S]*?primary key \(batch_id, auth_user_id\)/);
   assert.match(migration, /delete from public\.organizations[\s\S]*?insert into private\.account_deletion_auth_jobs/);
   assert.match(migration, /limit 25/);
+  assert.match(migration, /order by last_attempt_at nulls first, created_at, auth_user_id/);
   assert.doesNotMatch(edge, /\.from\("stock_movements"\)\s*\.delete\(/);
 });
