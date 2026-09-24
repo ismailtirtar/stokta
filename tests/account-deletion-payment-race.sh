@@ -21,6 +21,8 @@ delete from public.web_payment_notifications
 where organization_id in ('$org_first'::uuid, '$org_second'::uuid);
 select public.service_delete_account_data('$admin_first'::uuid);
 select public.service_delete_account_data('$admin_second'::uuid);
+delete from private.account_deletion_auth_jobs
+where auth_user_id in ('$admin_first'::uuid, '$admin_second'::uuid);
 delete from auth.users where id in ('$admin_first'::uuid, '$admin_second'::uuid);
 SQL
   rm -rf "$proof_dir"
