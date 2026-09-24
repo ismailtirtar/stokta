@@ -9,7 +9,7 @@ const migration = readFileSync(
   "utf8",
 );
 
-function runEdge(deletionResult, { deleteUserError = null } = {}) {
+function runEdge(deletionResult, { deleteUserError = null, verificationLookupError = null } = {}) {
   const events = [];
   let handler;
   const caller = {
@@ -27,7 +27,7 @@ function runEdge(deletionResult, { deleteUserError = null } = {}) {
       admin: {
         updateUserById: async (id) => { events.push(`ban:${id}`); return { error: null }; },
         deleteUser: async (id) => { events.push(`delete-auth:${id}`); return { error: deleteUserError }; },
-        getUserById: async () => ({ data: { user: null } }),
+        getUserById: async () => ({ data: { user: null }, error: verificationLookupError }),
       },
     },
     rpc: async (name) => {
@@ -125,6 +125,18 @@ test("Auth failure is reported as pending cleanup, not deletion success", async 
     data: { deleted: true, scope: "account", authUserIds: ["user-1"] },
     error: null,
   }, { deleteUserError: { code: "auth_unavailable" } });
+  assert.equal(response.status, 503);
+  assert.equal(response.body.code, "AUTH_CLEANUP_PENDING");
+});
+
+test("temporary recovery identity lookup failure is reported as pending cleanup", async () => {
+  const { response } = await runEdge({
+    data: {
+      deleted: true, scope: "account", authUserIds: ["user-1"],
+      verificationUserId: "verification-1",
+    },
+    error: null,
+  }, { verificationLookupError: { code: "auth_unavailable" } });
   assert.equal(response.status, 503);
   assert.equal(response.body.code, "AUTH_CLEANUP_PENDING");
 });
