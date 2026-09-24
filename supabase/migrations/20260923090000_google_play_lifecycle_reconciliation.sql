@@ -600,6 +600,7 @@ create function public.service_record_google_play_void(
   p_token_hash text, p_order_hash text, p_event_time timestamptz
 ) returns boolean language plpgsql security definer set search_path = '' as $$
 declare subscription private.google_play_subscriptions;
+declare fallback_subscription private.google_play_subscriptions;
 declare web_until timestamptz;
 begin
   if p_token_hash is null or p_token_hash !~ '^[a-f0-9]{64}$'
@@ -630,12 +631,60 @@ begin
     select max(activated_until) into web_until from public.web_payment_notifications
     where organization_id = subscription.organization_id and status = 'approved'
       and activated_until > now();
+
+    -- The refunded pointer may have displaced another independent, valid Play
+    -- token. Re-elect only while the complete void scan is fresh; the ledger
+    -- alone cannot prove that a different token's latest order is not refunded.
+    select s.* into fallback_subscription
+    from private.google_play_subscriptions s
+    where s.organization_id = subscription.organization_id
+      and s.purchase_token_hash <> p_token_hash
+      and s.entitled and s.expiry_time > now()
+      and exists (
+        select 1 from private.google_play_void_scan_state scan
+        where scan.singleton = true and scan.page_token is null
+          and scan.last_completed_at > now() - interval '15 minutes'
+      )
+      and not exists (
+        select 1 from private.google_play_voided_orders v
+        where v.purchase_token_hash = s.purchase_token_hash
+          and (v.order_id_hash = s.latest_order_id_hash
+            or s.latest_order_id_hash is null)
+      )
+      and not exists (
+        select 1 from private.google_play_token_replacements r
+        where r.old_token_hash = s.purchase_token_hash
+          and r.activated_at is not null
+      )
+      and not exists (
+        select 1 from private.google_play_abandoned_tokens a
+        where a.purchase_token_hash = s.purchase_token_hash
+      )
+    order by s.expiry_time desc, s.purchase_token_hash desc
+    limit 1;
+
+    if fallback_subscription.purchase_token_hash is not null then
+      update private.google_play_entitlements
+      set current_purchase_token_hash = fallback_subscription.purchase_token_hash,
+          purchaser_user_id = fallback_subscription.purchaser_user_id,
+          product_id = fallback_subscription.product_id,
+          base_plan_id = fallback_subscription.base_plan_id,
+          subscription_state = fallback_subscription.subscription_state,
+          entitled = true,
+          current_period_end = fallback_subscription.expiry_time,
+          updated_at = now()
+      where organization_id = subscription.organization_id
+        and current_purchase_token_hash = p_token_hash;
+    end if;
     update public.organizations
     set subscription_status = case
           when subscription_status = 'suspended' then 'suspended'
-          when web_until > now() then 'active' else 'past_due' end,
-        current_period_end = case when web_until > now()
-          then web_until else now() end,
+          when fallback_subscription.purchase_token_hash is not null
+            or web_until > now() then 'active' else 'past_due' end,
+        current_period_end = case
+          when fallback_subscription.purchase_token_hash is not null
+            then greatest(fallback_subscription.expiry_time, web_until)
+          when web_until > now() then web_until else now() end,
         updated_at = now()
     where id = subscription.organization_id;
     return true;
