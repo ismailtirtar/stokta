@@ -240,6 +240,17 @@ begin
   -- that insert; row locks alone cannot protect a row that does not exist.
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(p_purchase_token_hash, 3073593::bigint));
+  -- The deployed verifier and the observation path both record a pending ACK
+  -- before calling Google. Refuse that first write while the refund scan is
+  -- absent, incomplete, or near its 15-minute grant expiry.
+  if p_acknowledgement_state = 'ACKNOWLEDGEMENT_STATE_PENDING'
+     and not exists (
+       select 1 from private.google_play_void_scan_state v
+       where v.singleton = true and v.page_token is null
+         and v.last_completed_at > now() - interval '10 minutes'
+     ) then
+    raise exception 'Google Play refund scan is not current' using errcode = '55000';
+  end if;
   -- A permanently replaced token is a no-op. Lock its ledger row first so a
   -- concurrent new-token activation cannot commit between this check and the
   -- old core grant. Never let the core temporarily promote this token over an
@@ -616,8 +627,11 @@ begin
     (purchase_token_hash, order_id_hash, event_time)
   values (p_token_hash, p_order_hash, p_event_time)
   on conflict (purchase_token_hash, order_id_hash) do nothing;
+  -- A missing latest order cannot prove that this void is from an older
+  -- renewal. Match conservatively, as the common grant fence already does.
   if subscription.purchase_token_hash is null
-     or subscription.latest_order_id_hash is distinct from p_order_hash then
+     or (subscription.latest_order_id_hash is not null
+       and subscription.latest_order_id_hash is distinct from p_order_hash) then
     return false;
   end if;
   update private.google_play_subscriptions set entitled = false
