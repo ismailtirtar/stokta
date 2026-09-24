@@ -101,6 +101,10 @@ begin
 
     delete from public.stock_movements
     where organization_id = v_organization_id;
+    -- PDF source files never leave the device. Remove the stored duplicate
+    -- detection and actor metadata before the tenant row (RESTRICT FK).
+    delete from private.pdf_stock_imports
+    where organization_id = v_organization_id;
     delete from public.products
     where organization_id = v_organization_id;
     update public.profiles set created_by = null
@@ -131,6 +135,9 @@ begin
     and verification_kind = 'temporary_signup';
 
   update public.stock_movements
+  set actor_id = null, actor_name = 'Silinmiş kullanıcı'
+  where actor_id = p_user_id;
+  update private.pdf_stock_imports
   set actor_id = null, actor_name = 'Silinmiş kullanıcı'
   where actor_id = p_user_id;
   update public.products set created_by = v_admin_id
