@@ -635,6 +635,9 @@ begin
     -- The refunded pointer may have displaced another independent, valid Play
     -- token. Re-elect only while the complete void scan is fresh; the ledger
     -- alone cannot prove that a different token's latest order is not refunded.
+    -- Skip another token being changed under its ledger lock. Waiting for it
+    -- while holding this organization's entitlement can deadlock; selecting
+    -- its uncommitted pre-refund state could restore refunded access.
     select s.* into fallback_subscription
     from private.google_play_subscriptions s
     where s.organization_id = subscription.organization_id
@@ -661,7 +664,8 @@ begin
         where a.purchase_token_hash = s.purchase_token_hash
       )
     order by s.expiry_time desc, s.purchase_token_hash desc
-    limit 1;
+    limit 1
+    for update of s skip locked;
 
     if fallback_subscription.purchase_token_hash is not null then
       update private.google_play_entitlements
