@@ -18,10 +18,13 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    özetlerinin cascade temizliğini sınayın. Geçiş, beklenmeyen eski RPC
    gövdesinde bilinçli olarak hata verir.
    Aktif bir test yöneticisiyle
-   `supabase/tests/google_play_refund_preserves_other_token.sql` senaryosunu
-   çalıştırın: önceden iade edilmiş daha uzun B dönemi geçerli A hakkını
-   devralmamalıdır.
-2. Supabase Edge secret'larını ekleyin:
+   `supabase/tests/google_play_prepare_activate.sql`,
+   `google_play_ack_scan_guard.sql`,
+   `google_play_refund_preserves_other_token.sql` ve
+   `google_play_refund_fallback.sql` senaryolarını çalıştırın. İlk aşama eski
+   RPC'yi çalışır tutarken yeni gözlemi kapatmalı; aktivasyon sonrası ACK
+   kapısı, önceden iade ve B hakkı açıldıktan sonraki iade A'yı korumalıdır.
+2. Google Cloud'da Android Publisher API'nin etkinliğini, Play Console API access hesabının doğru projeye bağlı ve abonelik/iadeyi okuma ile ACK yetkilerini doğrulayın; mevcut canlı izinleri varsaymayın. Ardından Supabase Edge secret'larını ekleyin:
    `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (mevcut Publisher servis hesabı),
    `GOOGLE_PLAY_TOKEN_ENCRYPTION_KEY` (tam 32 rastgele byte'ın standart
    Base64 karşılığı), `GOOGLE_PLAY_RECONCILE_SECRET` (en az 32 rastgele
@@ -45,12 +48,14 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    90 saniye, retry ve dead-letter topic (ör. 20 başarısız teslimat) kurun;
    teslim edilmeyen mesajlar ile dead-letter sayısını izleyin. Play Console
    RTDN ayarını ilk iade taraması bitene kadar etkinleştirmeyin.
-5. İzole prova ve diğer yayın kapıları geçince canlı migration'ı uygulayın.
-   İade taraması tam ve son 15 dakika içinde başarılı olana kadar Play hak
-   açma çağrıları 503 döner. Mevcut hakların süresi değişmez; yeni satın alma
-   doğrulaması bu sürede gecikir. Tarama için hemen adım 6'yı tamamlayın.
-   Kesintisiz yeni satın alma garantisi için ayrı aşamalı veri geçişi gerekir;
-   bu sürümün dağıtım kapısıdır.
+5. İzole prova ve diğer yayın kapıları geçince canlı migration'ı **hazırlık
+   aşaması** olarak uygulayın. `service_google_play_lifecycle_health()`
+   çıktısında `lifecycleActive=false` olmalı. Eski public RPC imzası ve
+   mevcut verifier'ın ACK akışı çalışır; kesin sipariş iade çiti yine etkindir.
+   İlk tarama bitmedi diye 10/15 dakikalık kapı henüz açılmaz. Yeni
+   `verify-play-subscription` sürümünü ve Play Console RTDN'yi henüz açmayın.
+   Bu aşamada beklenmeyen RPC davranışı varsa etkinleştirmeyin; veritabanı
+   migration'ını geri almak otomatik ve güvenli bir rollback değildir.
 6. Tek bir `stokdas-google-play-reconcile` zamanlayıcısı kurun; her 5
    dakikada bir `POST /functions/v1/google-play-reconcile` çağırmalı.
    `Authorization: Bearer <GOOGLE_PLAY_RECONCILE_SECRET>` değerini Supabase
@@ -59,17 +64,30 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    olsun. Yanıt 5xx ve dead-letter alarmlarını etkinleştirin. HTTP 200
    yanıtındaki `failed > 0` için de alarm kurun: tekil token hataları diğer
    tokenları durdurmadan ertelenir. `service_google_play_lifecycle_health()`
-   içindeki `voidLastCompletedAt` 10 dakikadan eskiyse uyarın (15 dakikada
-   Play grant kapanır); `overdueCount` ve `failedDueCount` artışlarını ve
+   içindeki `voidLastCompletedAt` 10 dakikadan eskiyse uyarın (aktivasyondan
+   sonra 15 dakikada Play grant kapanır); `overdueCount` ve `failedDueCount` artışlarını ve
    `unvaultedCount` başlangıç değerini izleyin. İlk 29 günlük taramayı hemen
    elle tetikleyin; çok sayfalıysa son sayfaya kadar tekrarlayın.
-   `voidLastCompletedAt` dolmadan yeni hak doğrulamasını tamamlanmış saymayın.
-7. `verify-play-subscription` Edge Function'ını kaynak sürümüyle dağıtın;
-   Supabase JWT gerektirir. Play Console > Monetization setup > Real-time
-   developer notifications ayarında abonelik/ürün bildirimlerini etkinleştirip
-   topic'in `projects/PROJECT/topics/TOPIC` yolunu girin. Şu an kutu kapalı ve
-   topic boş. Test notification gönderin; handler 204 dönmeli ve hak
-   değişmemeli.
+   İlk taramanın bütün sayfalarını bitirin; imleç boş ve
+   `voidLastCompletedAt` son 10 dakikada olmadan etkinleştirmeyin.
+   Hazırlık aşamasında yeni verifier gözlemleri veritabanında 55000 ile
+   durur, eski public RPC çalışmaya devam eder.
+7. Tarama sağlık alarmını ve eski verifier'ın çalıştığını doğrulayın.
+   Yeni `verify-play-subscription` Edge sürümünü dağıtın: hazırlık modunda
+   ilk gözlem 503 döner ve Google ACK yapılmaz. Önceki sürümden devam eden
+   doğrulama istekleri bitmeden aktivasyonu başlatmayın; Edge dağıtımı ile
+   yalnız veritabanı kilidi, Google ACK çağrısı süren isteği bekletmez.
+   Kısa doğrulama duraklamasını ve istemcinin geri yükleme yolunu lisans
+   hesabıyla test edin. Son tam tarama <10 dakika iken
+   `select public.service_activate_google_play_lifecycle();` işlemini
+   yetkili service rolüyle bir kez çalıştırın; `lifecycleActive=true`
+   sonucunu doğrulayın. Eski RPC'nin `FOR SHARE` durum kilidi, aktivasyonun
+   eski veritabanı işlemleri bitmeden geçmesini engeller.
+   Sonra Play Console > Monetization setup > Real-time developer
+   notifications ayarında abonelik/ürün bildirimlerini etkinleştirip
+   topic'in `projects/PROJECT/topics/TOPIC` yolunu girin. Şu an kutu
+   kapalı ve topic boş. Test notification gönderin; handler 204 dönmeli ve
+   hak değişmemeli.
 8. Önce Play lisans test hesabıyla satın alma/ACK ve restore, ardından
    yenileme, dönem sonu iptal, grace/hold, süresi dolmuş aboneliğin uygulama
    ve Play Store üzerinden yeniden alınması, bekleyen alımın iptali sonrası
@@ -90,6 +108,23 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
 
 ## Çalışma ve sınırlar
 
+- Hazırlık modu `lifecycleActive=false` ile başlar. Eski RPC, eski
+  verifier ve kesin sipariş iade çiti çalışır; yeni gözlem RPC'si 55000
+  döndürerek yanlışlıkla erken dağıtılmış yeni verifier/RTDN'nin ACK etmesini
+  önler. Etkinleştirme tek yönlü ve yalnız tamamlanmış son 10 dakikalık tarama
+  sonrası mümkündür. Yetki kapısını tekrar açacağı için aktif bayrağı false'a
+  çevirmek bir rollback yöntemi değildir.
+- ACK öncesi 10 dakikalık marj ve grant öncesi 15 dakikalık kapı,
+  Google ACK ile ikinci veritabanı kaydını atomik yapmaz. Bu arada tarama
+  bayatlayabilir veya veritabanı geçici düşebilir. Etkinleştirme sırasında
+  eski verifier'ın süren Google çağrılarını bitirmesi ve lisans testinde
+  satın alımın geri yüklenmesi ayrıca doğrulanmalıdır. Kesintisiz/sıfır risk
+  vaadi yoktur.
+- Son sipariş kimliği Google'da boşsa tokena ait herhangi bir iade
+  konservatif olarak güncel hakkı kapatır. Daha uzun B hakkı iade edilince,
+  tam/güncel taramadan doğrulanabilen bağımsız A hakkı yeniden seçilir.
+  A satırı eşzamanlı işlem nedeniyle kilitliyse fail-closed olarak atlanır;
+  sonraki iade taraması veya token uzlaştırması toparlamalıdır.
 - RTDN bir durum kararı değildir: handler Google'ın
   `purchases.subscriptionsv2.get` yanıtını ve hesap/ürün/plan eşleşmesini
   yeniden doğrular. Pub/Sub 2xx yanıtı yalnız başarılı işleme veya bilinmeyen

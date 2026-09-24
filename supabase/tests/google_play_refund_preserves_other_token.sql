@@ -43,6 +43,7 @@ begin
   update private.google_play_void_scan_state
   set page_token = null, last_completed_at = now()
   where singleton = true;
+  perform public.service_activate_google_play_lifecycle();
 
   perform public.service_record_google_play_subscription(
     token_a, purchaser, test_organization, 'stokdas_pro', 'monthly',

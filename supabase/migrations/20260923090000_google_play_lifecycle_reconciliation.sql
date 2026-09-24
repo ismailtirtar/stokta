@@ -75,6 +75,16 @@ create table private.google_play_void_scan_state (
 insert into private.google_play_void_scan_state(singleton, start_time_ms)
 values (true, (extract(epoch from now() - interval '29 days') * 1000)::bigint);
 
+-- Preparation changes remain compatible with the deployed verifier. The
+-- refund-sweep grant gate is enabled only after the first complete scan.
+create table private.google_play_lifecycle_activation (
+  singleton boolean primary key default true check (singleton),
+  active boolean not null default false,
+  activated_at timestamptz
+);
+insert into private.google_play_lifecycle_activation(singleton, active)
+values (true, false);
+
 alter table private.google_play_token_vault enable row level security;
 alter table private.google_play_token_vault force row level security;
 alter table private.google_play_observation_leases enable row level security;
@@ -87,12 +97,15 @@ alter table private.google_play_voided_orders enable row level security;
 alter table private.google_play_voided_orders force row level security;
 alter table private.google_play_void_scan_state enable row level security;
 alter table private.google_play_void_scan_state force row level security;
+alter table private.google_play_lifecycle_activation enable row level security;
+alter table private.google_play_lifecycle_activation force row level security;
 revoke all on table private.google_play_token_vault,
   private.google_play_observation_leases,
   private.google_play_token_replacements,
   private.google_play_abandoned_tokens,
   private.google_play_voided_orders,
-  private.google_play_void_scan_state
+  private.google_play_void_scan_state,
+  private.google_play_lifecycle_activation
   from public, anon, authenticated, service_role;
 
 create function public.service_claim_google_play_observation(p_token_hash text)
@@ -235,7 +248,17 @@ declare organization_status text;
 declare organization_period_end timestamptz;
 declare play_entitled boolean;
 declare refunded_current_order boolean := false;
+declare lifecycle_active boolean;
 begin
+  -- Hold a shared activation-row lock through this entire old-RPC call.
+  -- Activation waits for pre-cutover purchases to finish before switching on
+  -- the refund-sweep gate.
+  select active into lifecycle_active
+  from private.google_play_lifecycle_activation
+  where singleton = true for share;
+  if lifecycle_active is null then
+    raise exception 'Google Play lifecycle state is missing' using errcode = '55000';
+  end if;
   -- A void arriving before this token's first ledger row must serialize with
   -- that insert; row locks alone cannot protect a row that does not exist.
   perform pg_catalog.pg_advisory_xact_lock(
@@ -243,7 +266,8 @@ begin
   -- The deployed verifier and the observation path both record a pending ACK
   -- before calling Google. Refuse that first write while the refund scan is
   -- absent, incomplete, or near its 15-minute grant expiry.
-  if p_acknowledgement_state = 'ACKNOWLEDGEMENT_STATE_PENDING'
+  if lifecycle_active
+     and p_acknowledgement_state = 'ACKNOWLEDGEMENT_STATE_PENDING'
      and not exists (
        select 1 from private.google_play_void_scan_state v
        where v.singleton = true and v.page_token is null
@@ -288,7 +312,7 @@ begin
   -- A successful GET can still show ACTIVE after a refund. Until the voided
   -- orders sweep is complete and recent, roll back any Play grant from the
   -- core (including calls through the old public RPC).
-  if exists (
+  if lifecycle_active and exists (
     select 1 from private.google_play_entitlements e
     where e.organization_id = p_organization_id
       and e.current_purchase_token_hash = p_purchase_token_hash
@@ -378,7 +402,16 @@ declare prior_replacement private.google_play_token_replacements;
 declare abandoned private.google_play_subscriptions;
 declare web_until timestamptz;
 declare result jsonb;
+declare lifecycle_active boolean;
 begin
+  -- New Edge verification and RTDN must stay inert during the first scan.
+  -- The deployed verifier continues through the old public RPC instead.
+  select active into lifecycle_active
+  from private.google_play_lifecycle_activation
+  where singleton = true for share;
+  if lifecycle_active is distinct from true then
+    raise exception 'Google Play lifecycle is not active' using errcode = '55000';
+  end if;
   if p_observation is null or jsonb_typeof(p_observation) <> 'object'
      or token_hash is null or token_hash !~ '^[a-f0-9]{64}$'
      or p_token_ciphertext is null or length(p_token_ciphertext) not between 24 and 8192
@@ -858,6 +891,29 @@ begin
 end;
 $$;
 
+create function public.service_activate_google_play_lifecycle()
+returns boolean language plpgsql security definer set search_path = '' as $
+begin
+  -- This row lock waits for every old-RPC transaction that saw inactive mode.
+  perform 1 from private.google_play_lifecycle_activation
+  where singleton = true for update;
+  if not found then
+    raise exception 'Google Play lifecycle state is missing' using errcode = '55000';
+  end if;
+  if not exists (
+    select 1 from private.google_play_void_scan_state v
+    where v.singleton = true and v.page_token is null
+      and v.last_completed_at > now() - interval '10 minutes'
+  ) then
+    raise exception 'Google Play refund scan is not current' using errcode = '55000';
+  end if;
+  update private.google_play_lifecycle_activation
+  set active = true, activated_at = coalesce(activated_at, now())
+  where singleton = true;
+  return true;
+end;
+$;
+
 create function public.service_google_play_lifecycle_health()
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare vault_count bigint;
@@ -865,6 +921,7 @@ declare unvaulted_count bigint;
 declare overdue_count bigint;
 declare failed_count bigint;
 declare last_void_scan timestamptz;
+declare lifecycle_active boolean;
 begin
   select count(*) into vault_count from private.google_play_token_vault;
   select count(*) into unvaulted_count from private.google_play_subscriptions s
@@ -874,7 +931,9 @@ begin
   into overdue_count, failed_count from private.google_play_token_vault
   where reconcile_after <= now();
   select last_completed_at into last_void_scan from private.google_play_void_scan_state;
-  return jsonb_build_object('vaultCount', vault_count,
+  select active into lifecycle_active from private.google_play_lifecycle_activation;
+  return jsonb_build_object('lifecycleActive', lifecycle_active,
+    'vaultCount', vault_count,
     'unvaultedCount', unvaulted_count,
     'overdueCount', overdue_count,
     'failedDueCount', failed_count,
@@ -896,7 +955,8 @@ revoke all on function public.service_claim_google_play_observation(text),
   public.service_get_google_play_void_cursor(),
   public.service_advance_google_play_void_cursor(bigint,text,text),
   public.service_reset_google_play_void_cursor(bigint,text),
-  public.service_google_play_lifecycle_health()
+  public.service_google_play_lifecycle_health(),
+  public.service_activate_google_play_lifecycle()
 from public, anon, authenticated, service_role;
 
 grant execute on function public.service_claim_google_play_observation(text),
@@ -913,7 +973,8 @@ grant execute on function public.service_claim_google_play_observation(text),
   public.service_get_google_play_void_cursor(),
   public.service_advance_google_play_void_cursor(bigint,text,text),
   public.service_reset_google_play_void_cursor(bigint,text),
-  public.service_google_play_lifecycle_health()
+  public.service_google_play_lifecycle_health(),
+  public.service_activate_google_play_lifecycle()
 to service_role;
 
 notify pgrst, 'reload schema';
