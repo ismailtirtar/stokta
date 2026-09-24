@@ -5,6 +5,32 @@ begin;
 
 set local statement_timeout = '30s';
 
+-- Auth Admin API calls cannot join a PostgreSQL transaction. Persist their
+-- intent with the data deletion so a failed or interrupted Edge request can
+-- resume from the remaining rows. Keep only Auth UUIDs, no email or name.
+create table private.account_deletion_auth_jobs (
+  batch_id uuid not null,
+  auth_user_id uuid not null,
+  kind text not null check (kind in ('identity', 'temporary_verification')),
+  target_user_id uuid,
+  attempts integer not null default 0 check (attempts >= 0),
+  last_attempt_at timestamptz,
+  last_error_code text check (last_error_code is null or char_length(last_error_code) <= 80),
+  created_at timestamptz not null default now(),
+  constraint account_deletion_auth_job_target_check check (
+    (kind = 'identity' and target_user_id is null)
+    or (kind = 'temporary_verification' and target_user_id is not null)
+  ),
+  primary key (batch_id, auth_user_id)
+);
+
+create index account_deletion_auth_jobs_created_idx
+  on private.account_deletion_auth_jobs (created_at, batch_id);
+
+alter table private.account_deletion_auth_jobs enable row level security;
+revoke all on private.account_deletion_auth_jobs
+  from public, anon, authenticated, service_role;
+
 create or replace function public.service_delete_account_data(p_user_id uuid)
 returns jsonb
 language plpgsql
@@ -18,6 +44,7 @@ declare
   v_admin_id uuid;
   v_auth_user_ids uuid[];
   v_verification_user_id uuid;
+  v_batch_id uuid := gen_random_uuid();
 begin
   if p_user_id is null then
     return jsonb_build_object('code', 'ACCOUNT_NOT_FOUND');
@@ -114,10 +141,16 @@ begin
     delete from public.organizations
     where id = v_organization_id;
 
+    insert into private.account_deletion_auth_jobs (
+      batch_id, auth_user_id, kind
+    )
+    select v_batch_id, pending_user.auth_user_id, 'identity'
+    from unnest(v_auth_user_ids) as pending_user(auth_user_id);
+
     return jsonb_build_object(
       'deleted', true,
       'scope', 'organization',
-      'authUserIds', to_jsonb(v_auth_user_ids)
+      'batchId', v_batch_id
     );
   end if;
 
@@ -146,11 +179,20 @@ begin
   where organization_id = v_organization_id and created_by = p_user_id;
   delete from public.profiles where id = p_user_id;
 
+  insert into private.account_deletion_auth_jobs (
+    batch_id, auth_user_id, kind
+  ) values (v_batch_id, p_user_id, 'identity');
+  if v_verification_user_id is not null
+     and v_verification_user_id <> p_user_id then
+    insert into private.account_deletion_auth_jobs (
+      batch_id, auth_user_id, kind, target_user_id
+    ) values (v_batch_id, v_verification_user_id, 'temporary_verification', p_user_id);
+  end if;
+
   return jsonb_build_object(
     'deleted', true,
     'scope', 'account',
-    'authUserIds', jsonb_build_array(p_user_id),
-    'verificationUserId', v_verification_user_id
+    'batchId', v_batch_id
   );
 end;
 $$;
@@ -162,5 +204,102 @@ grant execute on function public.service_delete_account_data(uuid)
 
 comment on function public.service_delete_account_data(uuid) is
   'Service-role-only, atomic database deletion. Blocks pending and reviewed web payment notices until retention and support deletion are defined.';
+
+create or replace function public.service_list_account_deletion_auth_jobs(p_batch_id uuid default null)
+returns jsonb
+language sql
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'batchId', jobs.batch_id,
+        'authUserId', jobs.auth_user_id,
+        'kind', jobs.kind,
+        'targetUserId', jobs.target_user_id,
+        'attempts', jobs.attempts,
+        'lastErrorCode', jobs.last_error_code
+      ) order by jobs.created_at, jobs.auth_user_id
+    ),
+    '[]'::jsonb
+  )
+  from (
+    select batch_id, auth_user_id, kind, target_user_id,
+           attempts, last_error_code, created_at
+    from private.account_deletion_auth_jobs
+    where p_batch_id is null or batch_id = p_batch_id
+    order by created_at, auth_user_id
+    limit 25
+  ) as jobs;
+$$;
+
+revoke all on function public.service_list_account_deletion_auth_jobs(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.service_list_account_deletion_auth_jobs(uuid)
+  to service_role;
+
+create or replace function public.service_complete_account_deletion_auth_job(
+  p_batch_id uuid, p_auth_user_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  delete from private.account_deletion_auth_jobs
+  where batch_id = p_batch_id and auth_user_id = p_auth_user_id;
+  return found;
+end;
+$$;
+
+revoke all on function public.service_complete_account_deletion_auth_job(uuid, uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.service_complete_account_deletion_auth_job(uuid, uuid)
+  to service_role;
+
+create or replace function public.service_fail_account_deletion_auth_job(
+  p_batch_id uuid, p_auth_user_id uuid, p_error_code text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update private.account_deletion_auth_jobs
+  set attempts = attempts + 1,
+      last_attempt_at = now(),
+      last_error_code = left(coalesce(p_error_code, 'unknown'), 80)
+  where batch_id = p_batch_id and auth_user_id = p_auth_user_id;
+  return found;
+end;
+$$;
+
+revoke all on function public.service_fail_account_deletion_auth_job(uuid, uuid, text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.service_fail_account_deletion_auth_job(uuid, uuid, text)
+  to service_role;
+
+create or replace function public.service_account_deletion_auth_job_health()
+returns jsonb
+language sql
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'pending', count(*),
+    'withFailures', count(*) filter (where attempts > 0),
+    'oldestCreatedAt', min(created_at),
+    'latestAttemptAt', max(last_attempt_at)
+  )
+  from private.account_deletion_auth_jobs;
+$$;
+
+revoke all on function public.service_account_deletion_auth_job_health()
+  from public, anon, authenticated, service_role;
+grant execute on function public.service_account_deletion_auth_job_health()
+  to service_role;
 
 commit;
