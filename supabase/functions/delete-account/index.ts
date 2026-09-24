@@ -168,10 +168,13 @@ Deno.serve(async (req: Request) => {
 
     if (deletion.scope === "account" && typeof deletion.verificationUserId === "string"
       && deletion.verificationUserId !== caller.id) {
-      const { data: verificationUserData } = await admin.auth.admin.getUserById(
+      const { data: verificationUserData, error: verificationLookupError } = await admin.auth.admin.getUserById(
         deletion.verificationUserId,
       );
-      if (verificationUserData.user?.app_metadata?.stokta_verification_only === true
+      if (verificationLookupError) {
+        authCleanupFailed = true;
+        console.error("Temporary recovery identity lookup failed", verificationLookupError);
+      } else if (verificationUserData.user?.app_metadata?.stokta_verification_only === true
         && verificationUserData.user.app_metadata?.target_user_id === caller.id) {
         const { error: cleanupVerificationError } = await admin.auth.admin.deleteUser(
           deletion.verificationUserId,
