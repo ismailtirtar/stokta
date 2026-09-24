@@ -26,6 +26,119 @@ Deno.serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    const drainAuthJobs = async (batchId: string | null) => {
+      const { data: jobs, error: listError } = await admin.rpc(
+        "service_list_account_deletion_auth_jobs", { p_batch_id: batchId },
+      );
+      if (listError || !Array.isArray(jobs)) {
+        console.error("Account deletion Auth outbox read failed", listError);
+        return { failed: true, processed: 0, pending: true };
+      }
+
+      let failed = false;
+      let processed = 0;
+      for (const job of jobs) {
+        const userId = job?.authUserId;
+        const jobBatchId = job?.batchId;
+        if (typeof userId !== "string" || typeof jobBatchId !== "string"
+          || (job.kind !== "identity" && job.kind !== "temporary_verification")) {
+          failed = true;
+          console.error("Account deletion Auth outbox row is invalid");
+          continue;
+        }
+
+        const failJob = async (code: string) => {
+          failed = true;
+          const { error: recordError } = await admin.rpc(
+            "service_fail_account_deletion_auth_job",
+            { p_batch_id: jobBatchId, p_auth_user_id: userId, p_error_code: code },
+          );
+          if (recordError) console.error("Account deletion Auth failure record failed", recordError);
+        };
+
+        const { data: lookupData, error: lookupError } = await admin.auth.admin.getUserById(userId);
+        const alreadyDeleted = lookupError?.status === 404 && lookupError?.code === "user_not_found";
+        if (lookupError && !alreadyDeleted) {
+          await failJob(typeof lookupError.code === "string" ? lookupError.code : "auth_lookup_failed");
+          continue;
+        }
+        if (!lookupError && !lookupData?.user) {
+          await failJob("auth_lookup_empty");
+          continue;
+        }
+
+        if (!alreadyDeleted && job.kind === "temporary_verification"
+          && (lookupData?.user?.app_metadata?.stokta_verification_only !== true
+            || lookupData?.user?.app_metadata?.target_user_id !== job.targetUserId)) {
+          await failJob("verification_metadata_mismatch");
+          continue;
+        }
+
+        if (!alreadyDeleted) {
+          if (job.kind === "identity") {
+            const { error: banError } = await admin.auth.admin.updateUserById(userId, {
+              ban_duration: "876000h",
+            });
+            if (banError) console.error("Account deletion Auth ban failed", { userId, banError });
+
+            const { error: revokeError } = await admin.rpc("service_revoke_user_sessions", {
+              p_user_id: userId, p_except_session_id: null,
+            });
+            if (revokeError) console.error("Account deletion session revocation failed", { userId, revokeError });
+          }
+
+          const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
+          if (deleteError && !(deleteError.status === 404 && deleteError.code === "user_not_found")) {
+            await failJob(typeof deleteError.code === "string" ? deleteError.code : "auth_delete_failed");
+            continue;
+          }
+        }
+
+        const { error: completeError } = await admin.rpc(
+          "service_complete_account_deletion_auth_job",
+          { p_batch_id: jobBatchId, p_auth_user_id: userId },
+        );
+        if (completeError) {
+          failed = true;
+          console.error("Account deletion Auth outbox completion failed", completeError);
+        } else {
+          processed += 1;
+        }
+      }
+
+      const { data: remaining, error: remainingError } = await admin.rpc(
+        "service_list_account_deletion_auth_jobs", { p_batch_id: batchId },
+      );
+      if (remainingError || !Array.isArray(remaining)) {
+        console.error("Account deletion Auth outbox verification failed", remainingError);
+        return { failed: true, processed, pending: true };
+      }
+      return { failed, processed, pending: remaining.length > 0 };
+    };
+
+    // A trusted operator can retry up to 25 persisted jobs per call using the
+    // existing server-side service role key. No deleted profile is required.
+    if (token === serviceRoleKey) {
+      const retryBody = await req.json() as { operation?: unknown; batchId?: unknown };
+      if (!retryBody || typeof retryBody !== "object"
+        || retryBody.operation !== "retry-auth-cleanup"
+        || (retryBody.batchId !== undefined
+          && (typeof retryBody.batchId !== "string"
+            || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(retryBody.batchId)))) {
+        return json(400, { error: "Geçersiz Auth temizlik isteği" });
+      }
+      const retryResult = await drainAuthJobs(
+        typeof retryBody.batchId === "string" ? retryBody.batchId : null,
+      );
+      const { data: health, error: healthError } = await admin.rpc(
+        "service_account_deletion_auth_job_health",
+      );
+      return json(retryResult.failed || retryResult.pending || healthError ? 503 : 200, {
+        ...retryResult,
+        health: healthError ? null : health,
+      });
+    }
+
     const { data: userData, error: userError } = await admin.auth.getUser(token);
     if (userError || !userData.user) return json(401, { error: "Geçersiz oturum" });
     const sessionId = sessionIdFromAccessToken(token);
@@ -135,61 +248,16 @@ Deno.serve(async (req: Request) => {
     }
     if (deletion?.deleted !== true
       || (deletion.scope !== "organization" && deletion.scope !== "account")
-      || !Array.isArray(deletion.authUserIds)) {
+      || typeof deletion.batchId !== "string") {
       console.error("Account deletion transaction returned an invalid result");
       return json(503, { error: "Hesap silme sonucu doğrulanamadı. Destek ile iletişime geçin." });
     }
 
-    // Auth Admin is outside the database transaction. A failure here requires
-    // an explicit recovery workflow before this draft can ship.
-    let authCleanupFailed = false;
-    for (const userId of deletion.authUserIds) {
-      if (typeof userId !== "string") {
-        authCleanupFailed = true;
-        continue;
-      }
-      const { error: banError } = await admin.auth.admin.updateUserById(userId, {
-        ban_duration: "876000h",
-      });
-      if (banError) console.error("Account deletion Auth ban failed", { userId, banError });
-
-      const { error: revokeError } = await admin.rpc("service_revoke_user_sessions", {
-        p_user_id: userId,
-        p_except_session_id: null,
-      });
-      if (revokeError) console.error("Account deletion session revocation failed", { userId, revokeError });
-
-      const { error: deleteUserError } = await admin.auth.admin.deleteUser(userId);
-      if (deleteUserError) {
-        authCleanupFailed = true;
-        console.error("Account deletion Auth user cleanup failed", { userId, deleteUserError });
-      }
-    }
-
-    if (deletion.scope === "account" && typeof deletion.verificationUserId === "string"
-      && deletion.verificationUserId !== caller.id) {
-      const { data: verificationUserData, error: verificationLookupError } = await admin.auth.admin.getUserById(
-        deletion.verificationUserId,
-      );
-      if (verificationLookupError) {
-        authCleanupFailed = true;
-        console.error("Temporary recovery identity lookup failed", verificationLookupError);
-      } else if (verificationUserData.user?.app_metadata?.stokta_verification_only === true
-        && verificationUserData.user.app_metadata?.target_user_id === caller.id) {
-        const { error: cleanupVerificationError } = await admin.auth.admin.deleteUser(
-          deletion.verificationUserId,
-        );
-        if (cleanupVerificationError) {
-          authCleanupFailed = true;
-          console.error("Temporary recovery identity cleanup failed", cleanupVerificationError);
-        }
-      }
-    }
-
-    if (authCleanupFailed) {
+    const cleanup = await drainAuthJobs(deletion.batchId);
+    if (cleanup.failed || cleanup.pending) {
       return json(503, {
         code: "AUTH_CLEANUP_PENDING",
-        error: "Hesap verileri silindi ancak giriş kayıtlarının temizliği tamamlanamadı. Lütfen tirtarismail@gmail.com adresine yazın.",
+        error: "Hesap verileri silindi; giriş kimliklerinin temizliği sürüyor. Lütfen tirtarismail@gmail.com adresine yazın.",
         supportEmail: "tirtarismail@gmail.com",
       });
     }
