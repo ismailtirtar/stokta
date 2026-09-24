@@ -24,8 +24,9 @@ create table private.account_deletion_auth_jobs (
   primary key (batch_id, auth_user_id)
 );
 
-create index account_deletion_auth_jobs_created_idx
-  on private.account_deletion_auth_jobs (created_at, batch_id);
+create index account_deletion_auth_jobs_retry_idx
+  on private.account_deletion_auth_jobs
+  (last_attempt_at asc nulls first, created_at, batch_id, auth_user_id);
 
 alter table private.account_deletion_auth_jobs enable row level security;
 revoke all on private.account_deletion_auth_jobs
@@ -220,16 +221,19 @@ as $$
         'targetUserId', jobs.target_user_id,
         'attempts', jobs.attempts,
         'lastErrorCode', jobs.last_error_code
-      ) order by jobs.created_at, jobs.auth_user_id
+      ) order by jobs.last_attempt_at nulls first,
+                 jobs.created_at, jobs.auth_user_id
     ),
     '[]'::jsonb
   )
   from (
     select batch_id, auth_user_id, kind, target_user_id,
-           attempts, last_error_code, created_at
+           attempts, last_error_code, last_attempt_at, created_at
     from private.account_deletion_auth_jobs
     where p_batch_id is null or batch_id = p_batch_id
-    order by created_at, auth_user_id
+    -- Retried failures move behind never-attempted and older jobs. A single
+    -- permanent failure cannot starve later batches behind LIMIT 25.
+    order by last_attempt_at nulls first, created_at, auth_user_id
     limit 25
   ) as jobs;
 $$;
