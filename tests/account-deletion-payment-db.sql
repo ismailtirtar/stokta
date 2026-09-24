@@ -23,6 +23,7 @@ declare
   v_member uuid := gen_random_uuid();
   v_organization uuid := gen_random_uuid();
   v_product uuid;
+  v_pdf_import uuid;
   v_notice uuid;
   v_result jsonb;
   v_failed boolean := false;
@@ -56,10 +57,17 @@ begin
   insert into public.products (name, sku, stock, created_by, organization_id)
   values ('Fixture', 'DEL-' || left(v_suffix, 16), 1, v_admin, v_organization)
   returning id into v_product;
+  insert into private.pdf_stock_imports (
+    organization_id, movement_type, file_name, document_sha256,
+    line_count, actor_id, actor_name
+  ) values (
+    v_organization, 'in', 'fixture.pdf', repeat('a', 64),
+    1, v_member, 'Deletion Member'
+  ) returning id into v_pdf_import;
   insert into public.stock_movements (
     product_id, type, quantity, previous_stock, new_stock,
-    actor_id, actor_name, organization_id
-  ) values (v_product, 'in', 1, 0, 1, v_member, 'Deletion Member', v_organization);
+    actor_id, actor_name, organization_id, pdf_import_id
+  ) values (v_product, 'in', 1, 0, 1, v_member, 'Deletion Member', v_organization, v_pdf_import);
 
   insert into public.web_payment_notifications (
     organization_id, submitted_by, sender_name, amount_cents,
@@ -85,11 +93,27 @@ begin
     raise exception 'Reviewed notice failed to block member deletion: %', v_result;
   end if;
   if not exists (select 1 from public.profiles where id = v_member)
-     or not exists (select 1 from public.products where id = v_product) then
+     or not exists (select 1 from public.products where id = v_product)
+     or not exists (select 1 from private.pdf_stock_imports
+                    where id = v_pdf_import and actor_id = v_member
+                      and actor_name = 'Deletion Member') then
     raise exception 'Blocked deletion changed tenant data';
   end if;
 
   delete from public.web_payment_notifications where id = v_notice;
+  v_result := public.service_delete_account_data(v_member);
+  if v_result->>'deleted' <> 'true'
+     or v_result->>'scope' <> 'account'
+     or exists (select 1 from public.profiles where id = v_member)
+     or not exists (select 1 from private.pdf_stock_imports
+                    where id = v_pdf_import and actor_id is null
+                      and actor_name = 'Silinmiş kullanıcı')
+     or not exists (select 1 from public.stock_movements
+                    where product_id = v_product and actor_id is null
+                      and actor_name = 'Silinmiş kullanıcı') then
+    raise exception 'No-notice member cleanup failed: %', v_result;
+  end if;
+
   begin
     perform public.service_delete_account_data(v_admin);
   exception when others then
@@ -101,9 +125,10 @@ begin
   end;
   if not v_failed
      or not exists (select 1 from public.organizations where id = v_organization)
-     or not exists (select 1 from public.profiles where id = v_member)
+     or not exists (select 1 from public.profiles where id = v_admin)
      or not exists (select 1 from public.products where id = v_product)
-     or not exists (select 1 from public.stock_movements where product_id = v_product) then
+     or not exists (select 1 from public.stock_movements where product_id = v_product)
+     or not exists (select 1 from private.pdf_stock_imports where id = v_pdf_import) then
     raise exception 'Database cleanup did not roll back as one transaction';
   end if;
 
@@ -114,6 +139,7 @@ begin
      or exists (select 1 from public.organizations where id = v_organization)
      or exists (select 1 from public.profiles where organization_id = v_organization)
      or exists (select 1 from public.products where id = v_product)
+     or exists (select 1 from private.pdf_stock_imports where id = v_pdf_import)
      or exists (select 1 from public.stock_movements where product_id = v_product) then
     raise exception 'No-notice organization cleanup failed: %', v_result;
   end if;
