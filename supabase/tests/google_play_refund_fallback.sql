@@ -24,6 +24,8 @@ begin
     and o.subscription_status <> 'suspended'
     and not exists (select 1 from private.google_play_entitlements e
       where e.organization_id = p.organization_id)
+    and not exists (select 1 from private.google_play_subscriptions s
+      where s.organization_id = p.organization_id)
     and not exists (select 1 from public.web_payment_notifications w
       where w.organization_id = p.organization_id and w.status = 'approved'
         and w.activated_until > now())
