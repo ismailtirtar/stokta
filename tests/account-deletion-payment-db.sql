@@ -131,15 +131,23 @@ begin
                       and actor_name = 'Silinmiş kullanıcı') then
     raise exception 'No-notice member cleanup failed: %', v_result;
   end if;
-  if not public.service_fail_account_deletion_auth_job(v_member_batch, v_member, 'fixture_error')
-     or not exists (select 1 from private.account_deletion_auth_jobs
-                    where batch_id = v_member_batch and attempts = 1
-                      and last_error_code = 'fixture_error')
-     or (public.service_account_deletion_auth_job_health()->>'withFailures')::integer < 1
-     or not public.service_complete_account_deletion_auth_job(v_member_batch, v_member)
-     or public.service_complete_account_deletion_auth_job(v_member_batch, v_member)
-     or jsonb_array_length(public.service_list_account_deletion_auth_jobs(v_member_batch)) <> 0 then
-    raise exception 'Auth outbox retry or idempotent completion failed';
+  if not public.service_fail_account_deletion_auth_job(v_member_batch, v_member, 'fixture_error') then
+    raise exception 'Auth outbox failure was not recorded';
+  end if;
+  if not exists (select 1 from private.account_deletion_auth_jobs
+                 where batch_id = v_member_batch and attempts = 1
+                   and last_error_code = 'fixture_error')
+     or (public.service_account_deletion_auth_job_health()->>'withFailures')::integer < 1 then
+    raise exception 'Auth outbox failure state is missing';
+  end if;
+  if not public.service_complete_account_deletion_auth_job(v_member_batch, v_member) then
+    raise exception 'Auth outbox completion failed';
+  end if;
+  if public.service_complete_account_deletion_auth_job(v_member_batch, v_member) then
+    raise exception 'Auth outbox completion is not idempotent';
+  end if;
+  if jsonb_array_length(public.service_list_account_deletion_auth_jobs(v_member_batch)) <> 0 then
+    raise exception 'Completed Auth outbox job remains pending';
   end if;
 
   begin
