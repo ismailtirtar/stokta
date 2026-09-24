@@ -67,31 +67,6 @@ Deno.serve(async (req: Request) => {
     if (!callerEmail || currentPassword.length < 1 || currentPassword.length > 72) {
       return json(400, { error: "Hesabı silmek için mevcut şifrenizi girin" });
     }
-    // These records have RESTRICT links to both the tenant and the submitting
-    // profile. Stop before banning users, revoking sessions, or deleting data.
-    // Their lawful retention and eventual deletion need a separate workflow.
-    const paymentRecordColumn = caller.role === "admin" ? "organization_id" : "submitted_by";
-    const paymentRecordId = caller.role === "admin" ? caller.organization_id : caller.id;
-    const { data: paymentRecord, error: paymentRecordError } = await admin
-      .from("web_payment_notifications")
-      .select("id")
-      .eq(paymentRecordColumn, paymentRecordId)
-      .limit(1)
-      .maybeSingle();
-    if (paymentRecordError) {
-      console.error("Account deletion payment record check failed", {
-        code: typeof paymentRecordError.code === "string" ? paymentRecordError.code : "unknown",
-      });
-      return json(503, { error: "Ödeme kayıtları doğrulanamadı. Lütfen daha sonra tekrar deneyin." });
-    }
-    if (paymentRecord) {
-      return json(409, {
-        code: "PAYMENT_RECORDS_REQUIRE_REVIEW",
-        error: "Bu hesapla ilişkili ödeme bildirimleri var. Hesap ve veri silme talebinizi tirtarismail@gmail.com adresine iletin.",
-        supportEmail: "tirtarismail@gmail.com",
-      });
-    }
-
     const reauthClient = createClient(supabaseUrl, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
@@ -115,205 +90,110 @@ Deno.serve(async (req: Request) => {
       return json(503, { error: "Kimlik doğrulama oturumu kapatılamadı" });
     }
 
-    if (caller.role === "admin") {
-      const { data: requiresCancellation, error: cancellationCheckError } = await admin.rpc(
-        "service_google_play_subscription_requires_cancellation",
-        { p_organization_id: caller.organization_id },
-      );
-      if (cancellationCheckError) {
-        console.error("Google Play cancellation check failed", {
-          code: typeof cancellationCheckError.code === "string"
-            ? cancellationCheckError.code
-            : "unknown",
-        });
-        return json(503, { error: "Google Play abonelik durumu doğrulanamadı" });
-      }
-      if (requiresCancellation) {
-        return json(409, {
-          error: "İşletmeyi silmeden önce Google Play aboneliğini iptal edin ve Stokdaş'ta satın alımları geri yükleyin",
-          code: "ACTIVE_GOOGLE_PLAY_SUBSCRIPTION",
-        });
-      }
-
-      const { data: profiles, error: profilesError } = await admin
-        .from("profiles")
-        .select("id,is_platform_operator")
-        .eq("organization_id", caller.organization_id);
-      if (profilesError) throw profilesError;
-      if ((profiles ?? []).some((profile) => profile.is_platform_operator)) {
-        return json(403, { error: "Platform yöneticisinin bulunduğu işletme silinemez" });
-      }
-
-      const { data: pendingAccounts, error: pendingAccountsError } = await admin
-        .from("pending_account_registrations")
-        .select("auth_user_id")
-        .eq("organization_id", caller.organization_id);
-      if (pendingAccountsError) throw pendingAccountsError;
-      const { data: pendingRecoveryAccounts, error: pendingRecoveryAccountsError } = await admin
-        .from("pending_recovery_email_verifications")
-        .select("target_user_id,verification_user_id,verification_kind")
-        .eq("organization_id", caller.organization_id);
-      if (pendingRecoveryAccountsError) throw pendingRecoveryAccountsError;
-
-      for (const profile of profiles ?? []) {
-        const { error: banError } = await admin.auth.admin.updateUserById(profile.id, {
-          ban_duration: "876000h",
-        });
-        if (banError) {
-          console.error("Organization deletion pre-ban failed", { userId: profile.id, banError });
-          return json(500, { error: "İşletme kullanıcıları güvenli biçimde kilitlenemedi" });
-        }
-        const { error: revokeError } = await admin.rpc("service_revoke_user_sessions", {
-          p_user_id: profile.id,
-          p_except_session_id: null,
-        });
-        if (revokeError) {
-          console.error("Organization deletion session revocation failed", {
-            userId: profile.id,
-            revokeError,
-          });
-          return json(500, { error: "İşletme kullanıcı oturumları kapatılamadı" });
-        }
-      }
-
-      const { error: movementError } = await admin
-        .from("stock_movements")
-        .delete()
-        .eq("organization_id", caller.organization_id);
-      if (movementError) throw movementError;
-      const { error: productError } = await admin
-        .from("products")
-        .delete()
-        .eq("organization_id", caller.organization_id);
-      if (productError) throw productError;
-      const { error: unlinkProfilesError } = await admin
-        .from("profiles")
-        .update({ created_by: null })
-        .eq("organization_id", caller.organization_id);
-      if (unlinkProfilesError) throw unlinkProfilesError;
-      const { error: profileError } = await admin
-        .from("profiles")
-        .delete()
-        .eq("organization_id", caller.organization_id);
-      if (profileError) throw profileError;
-
-      const { error: organizationError } = await admin
-        .from("organizations")
-        .delete()
-        .eq("id", caller.organization_id);
-      if (organizationError) throw organizationError;
-
-      const userIds = [...new Set([
-        ...(profiles ?? []).map((profile) => profile.id as string),
-        ...(pendingAccounts ?? []).map((pending) => pending.auth_user_id as string),
-        ...(pendingRecoveryAccounts ?? [])
-          .filter((pending) => pending.verification_kind === "temporary_signup")
-          .map((pending) => pending.verification_user_id as string),
-      ])];
-      for (const userId of userIds) {
-        const { error: deleteUserError } = await admin.auth.admin.deleteUser(userId);
-        if (deleteUserError) {
-          console.error("Auth user deletion failed", { userId, deleteUserError });
-          return json(500, {
-            error: "Stok verileri silindi ancak bir kullanıcı hesabı temizlenemedi. Supabase Auth kayıtlarını kontrol edin.",
-          });
-        }
-      }
-
-      return json(200, { deleted: true, scope: "organization" });
+    // The RPC takes an exclusive tenant lock, decides whether any pending or
+    // reviewed bank-transfer notice blocks deletion, then performs all
+    // database cleanup in one transaction. No account is banned beforehand.
+    const { data: deletionData, error: deletionError } = await admin.rpc(
+      "service_delete_account_data",
+      { p_user_id: caller.id },
+    );
+    if (deletionError) {
+      console.error("Account deletion transaction failed", {
+        code: typeof deletionError.code === "string" ? deletionError.code : "unknown",
+      });
+      return json(503, { error: "Hesap silme işlemi tamamlanamadı. Lütfen daha sonra tekrar deneyin." });
     }
 
-    const { data: pendingRecovery, error: pendingRecoveryError } = await admin
-      .from("pending_recovery_email_verifications")
-      .select("verification_user_id,verification_kind")
-      .eq("target_user_id", caller.id)
-      .maybeSingle();
-    if (pendingRecoveryError) throw pendingRecoveryError;
-
-    const { data: organizationAdmin, error: organizationAdminError } = await admin
-      .from("profiles")
-      .select("id")
-      .eq("organization_id", caller.organization_id)
-      .eq("role", "admin")
-      .eq("is_active", true)
-      .maybeSingle();
-    if (organizationAdminError) throw organizationAdminError;
-    if (!organizationAdmin) {
+    const deletion = deletionData as Record<string, unknown> | null;
+    if (deletion?.code === "PAYMENT_RECORDS_REQUIRE_REVIEW") {
       return json(409, {
-        error: "Hesap verilerini devralacak etkin işletme yöneticisi bulunamadı",
+        code: "PAYMENT_RECORDS_REQUIRE_REVIEW",
+        error: deletion.paymentStatus === "pending"
+          ? "Ödeme bildiriminiz henüz inceleniyor. Hesap ve veri silme talebinizi tirtarismail@gmail.com adresine iletin."
+          : "Bu hesapla ilişkili incelenmiş ödeme kayıtları var. Hesap ve veri silme talebinizi tirtarismail@gmail.com adresine iletin.",
+        supportEmail: "tirtarismail@gmail.com",
       });
     }
-
-    const { error: banError } = await admin.auth.admin.updateUserById(caller.id, {
-      ban_duration: "876000h",
-    });
-    if (banError) {
-      console.error("Account deletion pre-ban failed", banError);
-      return json(500, { error: "Hesap güvenli biçimde kilitlenemedi" });
-    }
-    const { error: revokeError } = await admin.rpc("service_revoke_user_sessions", {
-      p_user_id: caller.id,
-      p_except_session_id: null,
-    });
-    if (revokeError) {
-      console.error("Account deletion session revocation failed", revokeError);
-      return json(500, { error: "Hesap oturumları kapatılamadı" });
-    }
-
-    const { error: anonymizeError } = await admin
-      .from("stock_movements")
-      .update({ actor_id: null, actor_name: "Silinmiş kullanıcı" })
-      .eq("actor_id", caller.id);
-    if (anonymizeError) throw anonymizeError;
-
-    const { error: productOwnershipError } = await admin
-      .from("products")
-      .update({ created_by: organizationAdmin.id })
-      .eq("organization_id", caller.organization_id)
-      .eq("created_by", caller.id);
-    if (productOwnershipError) throw productOwnershipError;
-
-    const { error: profileOwnershipError } = await admin
-      .from("profiles")
-      .update({ created_by: organizationAdmin.id })
-      .eq("organization_id", caller.organization_id)
-      .eq("created_by", caller.id);
-    if (profileOwnershipError) throw profileOwnershipError;
-
-    const { error: profileDeleteError } = await admin
-      .from("profiles")
-      .delete()
-      .eq("id", caller.id);
-    if (profileDeleteError) throw profileDeleteError;
-
-    const { error: authDeleteError } = await admin.auth.admin.deleteUser(caller.id);
-    if (authDeleteError) {
-      console.error("Auth user deletion failed", authDeleteError);
-      return json(500, {
-        error: "Profil silindi ancak giriş kaydı temizlenemedi. Supabase Auth kayıtlarını kontrol edin.",
+    if (deletion?.code === "ACTIVE_GOOGLE_PLAY_SUBSCRIPTION") {
+      return json(409, {
+        code: "ACTIVE_GOOGLE_PLAY_SUBSCRIPTION",
+        error: "İşletmeyi silmeden önce Google Play aboneliğini iptal edin ve Stokdaş'ta satın alımları geri yükleyin",
       });
     }
+    if (deletion?.code === "PLATFORM_OPERATOR_IN_ORGANIZATION"
+      || deletion?.code === "PLATFORM_OPERATOR") {
+      return json(403, { error: "Platform yöneticisinin hesabı veya işletmesi uygulama içinden silinemez" });
+    }
+    if (deletion?.code === "PASSWORD_CHANGE_REQUIRED") {
+      return json(403, { error: "Hesabı silmeden önce geçici şifrenizi değiştirin", code: deletion.code });
+    }
+    if (deletion?.code === "ORGANIZATION_ADMIN_NOT_FOUND") {
+      return json(409, { error: "Hesap verilerini devralacak etkin işletme yöneticisi bulunamadı" });
+    }
+    if (deletion?.code === "ACCOUNT_NOT_FOUND") {
+      return json(404, { error: "Etkin kullanıcı profili bulunamadı" });
+    }
+    if (deletion?.deleted !== true
+      || (deletion.scope !== "organization" && deletion.scope !== "account")
+      || !Array.isArray(deletion.authUserIds)) {
+      console.error("Account deletion transaction returned an invalid result");
+      return json(503, { error: "Hesap silme sonucu doğrulanamadı. Destek ile iletişime geçin." });
+    }
 
-    if (pendingRecovery?.verification_kind === "temporary_signup"
-      && pendingRecovery.verification_user_id !== caller.id) {
+    // Auth Admin is outside the database transaction. A failure here requires
+    // an explicit recovery workflow before this draft can ship.
+    let authCleanupFailed = false;
+    for (const userId of deletion.authUserIds) {
+      if (typeof userId !== "string") {
+        authCleanupFailed = true;
+        continue;
+      }
+      const { error: banError } = await admin.auth.admin.updateUserById(userId, {
+        ban_duration: "876000h",
+      });
+      if (banError) console.error("Account deletion Auth ban failed", { userId, banError });
+
+      const { error: revokeError } = await admin.rpc("service_revoke_user_sessions", {
+        p_user_id: userId,
+        p_except_session_id: null,
+      });
+      if (revokeError) console.error("Account deletion session revocation failed", { userId, revokeError });
+
+      const { error: deleteUserError } = await admin.auth.admin.deleteUser(userId);
+      if (deleteUserError) {
+        authCleanupFailed = true;
+        console.error("Account deletion Auth user cleanup failed", { userId, deleteUserError });
+      }
+    }
+
+    if (deletion.scope === "account" && typeof deletion.verificationUserId === "string"
+      && deletion.verificationUserId !== caller.id) {
       const { data: verificationUserData } = await admin.auth.admin.getUserById(
-        pendingRecovery.verification_user_id,
+        deletion.verificationUserId,
       );
       if (verificationUserData.user?.app_metadata?.stokta_verification_only === true
         && verificationUserData.user.app_metadata?.target_user_id === caller.id) {
         const { error: cleanupVerificationError } = await admin.auth.admin.deleteUser(
-          pendingRecovery.verification_user_id,
+          deletion.verificationUserId,
         );
         if (cleanupVerificationError) {
+          authCleanupFailed = true;
           console.error("Temporary recovery identity cleanup failed", cleanupVerificationError);
         }
       }
     }
 
-    return json(200, { deleted: true, scope: "account" });
+    if (authCleanupFailed) {
+      return json(503, {
+        code: "AUTH_CLEANUP_PENDING",
+        error: "Hesap verileri silindi ancak giriş kayıtlarının temizliği tamamlanamadı. Lütfen tirtarismail@gmail.com adresine yazın.",
+        supportEmail: "tirtarismail@gmail.com",
+      });
+    }
+
+    return json(200, { deleted: true, scope: deletion.scope });
   } catch (error) {
     console.error("Account deletion failed", error);
     return json(500, { error: "Hesap silinemedi. Lütfen tekrar deneyin." });
   }
 });
-
