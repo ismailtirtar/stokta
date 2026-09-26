@@ -79,12 +79,20 @@ Deno.serve(async (req: Request) => {
             const { error: banError } = await admin.auth.admin.updateUserById(userId, {
               ban_duration: "876000h",
             });
-            if (banError) console.error("Account deletion Auth ban failed", { userId, banError });
+            if (banError) {
+              console.error("Account deletion Auth ban failed", { userId, banError });
+              await failJob("auth_ban_failed");
+              continue;
+            }
 
             const { error: revokeError } = await admin.rpc("service_revoke_user_sessions", {
               p_user_id: userId, p_except_session_id: null,
             });
-            if (revokeError) console.error("Account deletion session revocation failed", { userId, revokeError });
+            if (revokeError) {
+              console.error("Account deletion session revocation failed", { userId, revokeError });
+              await failJob("session_revoke_failed");
+              continue;
+            }
           }
 
           const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
