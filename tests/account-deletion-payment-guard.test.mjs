@@ -38,6 +38,8 @@ function edgeHarness(deletionResult, {
   }]));
   for (const userId of absentUserIds) authUsers.delete(userId);
   let currentDeleteUserError = deleteUserError;
+  let currentBanUserError = banUserError;
+  let currentRevokeUserSessionsError = revokeUserSessionsError;
   let attemptClock = 0;
   let handler;
   const caller = {
@@ -55,7 +57,7 @@ function edgeHarness(deletionResult, {
         ? { data: { user: { id: caller.id, email: "user@example.test" } }, error: null }
         : { data: { user: null }, error: { code: "invalid_token" } },
       admin: {
-        updateUserById: async (id) => { events.push(`ban:${id}`); return { error: banUserError }; },
+        updateUserById: async (id) => { events.push(`ban:${id}`); return { error: currentBanUserError }; },
         deleteUser: async (id) => {
           events.push(`delete-auth:${id}`);
           if (currentDeleteUserError) return { error: currentDeleteUserError };
@@ -81,7 +83,7 @@ function edgeHarness(deletionResult, {
         return { data: true, error: null };
       }
       if (name === "service_delete_account_data") return deletionResult;
-      if (name === "service_revoke_user_sessions") return { data: 1, error: revokeUserSessionsError };
+      if (name === "service_revoke_user_sessions") return { data: 1, error: currentRevokeUserSessionsError };
       if (name === "service_list_account_deletion_auth_jobs") {
         return { data: jobs.filter((job) => !params.p_batch_id || job.batchId === params.p_batch_id)
           .sort((left, right) => (left.lastAttemptAt ?? -1) - (right.lastAttemptAt ?? -1))
@@ -146,6 +148,8 @@ function edgeHarness(deletionResult, {
     events,
     jobs,
     setDeleteUserError: (error) => { currentDeleteUserError = error; },
+    setBanUserError: (error) => { currentBanUserError = error; },
+    setRevokeUserSessionsError: (error) => { currentRevokeUserSessionsError = error; },
   };
 }
 
@@ -279,18 +283,42 @@ test("persistent failures rotate behind untouched outbox jobs", async () => {
   assert.ok(harness.events.includes("delete-auth:user-25"));
 });
 
-test("failed ban, session revocation and Auth delete never acknowledge a job", async () => {
-  const { response, jobs } = await runEdge({
+test("failed ban retains the job and never revokes or deletes Auth until retry", async () => {
+  const harness = edgeHarness({
     data: { deleted: true, scope: "account", batchId: "batch-1" }, error: null,
-  }, {
-    banUserError: { code: "auth_unavailable" },
-    revokeUserSessionsError: { code: "database_unavailable" },
-    deleteUserError: { code: "auth_unavailable" },
-  });
+  }, { banUserError: { code: "auth_unavailable" } });
+  const response = await harness.invoke();
   assert.equal(response.status, 503);
   assert.equal(response.body.code, "AUTH_CLEANUP_PENDING");
-  assert.equal(jobs.length, 1);
-  assert.equal(jobs[0].attempts, 1);
+  assert.equal(harness.jobs.length, 1);
+  assert.equal(harness.jobs[0].attempts, 1);
+  assert.equal(harness.jobs[0].lastErrorCode, "auth_ban_failed");
+  assert.equal(harness.events.includes("rpc:service_revoke_user_sessions"), false);
+  assert.equal(harness.events.includes("delete-auth:user-1"), false);
+  harness.setBanUserError(null);
+  const retry = await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key");
+  assert.equal(retry.status, 200);
+  assert.equal(harness.jobs.length, 0);
+  assert.equal(harness.events.filter((event) => event === "delete-auth:user-1").length, 1);
+});
+
+test("failed session revocation retains the job and never deletes Auth until retry", async () => {
+  const harness = edgeHarness({
+    data: { deleted: true, scope: "account", batchId: "batch-1" }, error: null,
+  }, { revokeUserSessionsError: { code: "database_unavailable" } });
+  const response = await harness.invoke();
+  assert.equal(response.status, 503);
+  assert.equal(response.body.code, "AUTH_CLEANUP_PENDING");
+  assert.equal(harness.jobs.length, 1);
+  assert.equal(harness.jobs[0].attempts, 1);
+  assert.equal(harness.jobs[0].lastErrorCode, "session_revoke_failed");
+  assert.equal(harness.events.includes("ban:user-1"), true);
+  assert.equal(harness.events.includes("delete-auth:user-1"), false);
+  harness.setRevokeUserSessionsError(null);
+  const retry = await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key");
+  assert.equal(retry.status, 200);
+  assert.equal(harness.jobs.length, 0);
+  assert.equal(harness.events.filter((event) => event === "delete-auth:user-1").length, 1);
 });
 
 test("SQL serializes payment INSERTs with its guard and rolls back database cleanup together", () => {
