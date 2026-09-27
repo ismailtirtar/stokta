@@ -31,21 +31,24 @@ function playState(state, acknowledgementState, expiryTime = "2030-01-01T00:00:0
   };
 }
 
-function fakeAdmin() {
+function fakeAdmin({ ownerForHash = () => null, expectedToken = purchaseToken } = {}) {
   const recorded = [];
   const calls = [];
   return {
     recorded, calls,
     rpc: async (name, parameters) => {
       calls.push(name);
+      if (name === "service_get_google_play_owner") {
+        return { data: ownerForHash(parameters.p_token_hash), error: null };
+      }
       if (name === "service_claim_google_play_observation") {
         return { data: { leaseId: "33333333-3333-4333-8333-333333333333", generation: 1 }, error: null };
       }
       if (name === "service_record_google_play_observation") {
         recorded.push(parameters);
-        assert.equal(parameters.p_observation.purchaseTokenHash, await sha256(purchaseToken));
-        assert.notEqual(parameters.p_token_ciphertext, purchaseToken);
-        assert.ok(parameters.p_token_ciphertext.length > purchaseToken.length);
+        assert.equal(parameters.p_observation.purchaseTokenHash, await sha256(expectedToken));
+        assert.notEqual(parameters.p_token_ciphertext, expectedToken);
+        assert.ok(parameters.p_token_ciphertext.length > expectedToken.length);
         const active = parameters.p_observation.activateEntitlement;
         return { data: {
           entitled: active,
@@ -109,4 +112,140 @@ test("canceled period retains access; account hold does not", async () => {
     assert.equal(result.ledger.entitled, entitled);
     assert.equal(admin.recorded.length, 1);
   }
+});
+
+test("unknown linked RTDN token adopts only its ledger predecessor's owner before ACK", async () => {
+  const oldToken = "previous-purchase-token-123";
+  const newToken = "replacement-purchase-token-456";
+  const oldHash = await sha256(oldToken);
+  const admin = fakeAdmin({
+    ownerForHash: (hash) => hash === oldHash ? owner : null,
+    expectedToken: newToken,
+  });
+  let acknowledged = false;
+  const googlePlay = {
+    getSubscriptionPredecessor: async () => ({ token: oldToken, kind: "linked" }),
+    verifySubscription: async (_token, account, profile) => {
+      assert.equal(account, owner.accountHash);
+      assert.equal(profile, owner.profileHash);
+      return {
+        ...playState("SUBSCRIPTION_STATE_ACTIVE", acknowledged
+          ? "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED" : "ACKNOWLEDGEMENT_STATE_PENDING"),
+        predecessorToken: oldToken, predecessorKind: "linked",
+      };
+    },
+    acknowledgeSubscription: async () => {
+      assert.equal(admin.recorded.length, 1);
+      acknowledged = true;
+    },
+  };
+  const result = await processGooglePlayToken(admin, newToken, "rtdn", { googlePlay });
+  assert.equal(result.disposition, "recorded");
+  assert.equal(result.acknowledged, true);
+  assert.deepEqual(admin.recorded.map((call) => [
+    call.p_observation.predecessorTokenHash,
+    call.p_observation.predecessorKind,
+    call.p_observation.activateEntitlement,
+  ]), [[oldHash, "linked", false], [oldHash, "linked", true]]);
+});
+
+test("cross-organization predecessor never records or ACKs a purchase", async () => {
+  const oldToken = "previous-purchase-token-123";
+  const newToken = "replacement-purchase-token-456";
+  const otherOwner = {
+    ...owner,
+    organizationId: "44444444-4444-4444-8444-444444444444",
+    profileHash: await sha256("44444444-4444-4444-8444-444444444444"),
+  };
+  const awaitHash = await sha256(oldToken);
+  const admin = fakeAdmin({
+    ownerForHash: (hash) => hash === awaitHash ? otherOwner : null,
+    expectedToken: newToken,
+  });
+  let ackCount = 0;
+  const googlePlay = {
+    verifySubscription: async () => ({
+      ...playState("SUBSCRIPTION_STATE_ACTIVE", "ACKNOWLEDGEMENT_STATE_PENDING"),
+      predecessorToken: oldToken, predecessorKind: "linked",
+    }),
+    acknowledgeSubscription: async () => { ackCount++; },
+  };
+  await assert.rejects(
+    processGooglePlayToken(admin, newToken, "verify", { owner, googlePlay }),
+    { status: 409 },
+  );
+  assert.equal(admin.recorded.length, 0);
+  assert.equal(ackCount, 0);
+});
+
+test("unknown token without Play predecessor stays unowned and is never ACKed", async () => {
+  const admin = fakeAdmin();
+  let ackCount = 0;
+  const googlePlay = {
+    getSubscriptionPredecessor: async () => null,
+    verifySubscription: async () => { throw new Error("must not verify without owner"); },
+    acknowledgeSubscription: async () => { ackCount++; },
+  };
+  const result = await processGooglePlayToken(admin, purchaseToken, "rtdn", { googlePlay });
+  assert.deepEqual(result, { disposition: "unowned" });
+  assert.equal(admin.recorded.length, 0);
+  assert.equal(ackCount, 0);
+});
+
+test("abandoned pending sibling is never verified, recorded or ACKed later", async () => {
+  const awaitHash = await sha256(purchaseToken);
+  const admin = fakeAdmin({
+    ownerForHash: (hash) => hash === awaitHash
+      ? { ...owner, abandoned: true } : null,
+  });
+  const googlePlay = {
+    verifySubscription: async () => { throw new Error("must not call Publisher"); },
+    acknowledgeSubscription: async () => { throw new Error("must not ACK"); },
+  };
+  const result = await processGooglePlayToken(admin, purchaseToken, "rtdn", { googlePlay });
+  assert.deepEqual(result, { disposition: "unowned" });
+  assert.equal(admin.recorded.length, 0);
+  await assert.rejects(
+    processGooglePlayToken(admin, purchaseToken, "verify", { owner, googlePlay }),
+    { status: 409 },
+  );
+});
+
+test("out-of-app RTDN persists old ownership before ACK and uses new ledger afterward", async () => {
+  const oldToken = "expired-purchase-token-123";
+  const newToken = "store-purchase-token-456";
+  const oldHash = await sha256(oldToken);
+  const newHash = await sha256(newToken);
+  let recordedNewOwner = false;
+  const admin = fakeAdmin({
+    ownerForHash: (hash) => hash === oldHash || (recordedNewOwner && hash === newHash)
+      ? owner : null,
+    expectedToken: newToken,
+  });
+  const baseRpc = admin.rpc;
+  admin.rpc = async (name, parameters) => {
+    const answer = await baseRpc(name, parameters);
+    if (name === "service_record_google_play_observation") recordedNewOwner = true;
+    return answer;
+  };
+  let acknowledged = false;
+  const googlePlay = {
+    getSubscriptionPredecessor: async () => ({ token: oldToken, kind: "expired" }),
+    verifySubscription: async (_token, _account, _profile, allowKnown) => {
+      if (acknowledged) assert.equal(allowKnown, true);
+      return {
+        ...playState("SUBSCRIPTION_STATE_ACTIVE", acknowledged
+          ? "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED" : "ACKNOWLEDGEMENT_STATE_PENDING"),
+        predecessorToken: acknowledged ? null : oldToken,
+        predecessorKind: acknowledged ? null : "expired",
+      };
+    },
+    acknowledgeSubscription: async () => { acknowledged = true; },
+  };
+  await processGooglePlayToken(admin, newToken, "rtdn", { googlePlay });
+  assert.equal(admin.recorded[0].p_observation.predecessorTokenHash, oldHash);
+  assert.equal(admin.recorded[0].p_observation.predecessorKind, "expired");
+  assert.equal(admin.recorded[1].p_observation.predecessorTokenHash, null);
+  await processGooglePlayToken(admin, newToken, "reconcile", { googlePlay });
+  assert.equal(admin.recorded[2].p_observation.predecessorTokenHash, null);
 });

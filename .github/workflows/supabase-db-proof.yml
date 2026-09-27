@@ -76,14 +76,19 @@ jobs:
             'public.service_record_google_play_subscription(text,uuid,uuid,text,text,text,text,boolean,timestamptz,timestamptz,boolean,boolean,text,text,text)');
           declare core_rpc regprocedure := to_regprocedure(
             'private.service_record_google_play_subscription_core(text,uuid,uuid,text,text,text,text,boolean,timestamptz,timestamptz,boolean,boolean,text,text,text)');
+          declare activation_rpc regprocedure := to_regprocedure(
+            'public.service_activate_google_play_lifecycle()');
           begin
-            if public_rpc is null or core_rpc is null then
+            if public_rpc is null or core_rpc is null or activation_rpc is null then
               raise exception 'Google Play RPC migration is missing';
             end if;
             if not has_function_privilege('service_role', public_rpc, 'EXECUTE')
                or has_function_privilege('anon', public_rpc, 'EXECUTE')
                or has_function_privilege('authenticated', public_rpc, 'EXECUTE')
-               or has_function_privilege('service_role', core_rpc, 'EXECUTE') then
+               or has_function_privilege('service_role', core_rpc, 'EXECUTE')
+               or not has_function_privilege('service_role', activation_rpc, 'EXECUTE')
+               or has_function_privilege('anon', activation_rpc, 'EXECUTE')
+               or has_function_privilege('authenticated', activation_rpc, 'EXECUTE') then
               raise exception 'Google Play RPC grant boundary changed';
             end if;
             if (to_regclass('private.google_play_token_replacements') is null)
@@ -96,7 +101,8 @@ jobs:
                 'private.google_play_token_vault',
                 'private.google_play_observation_leases',
                 'private.google_play_voided_orders',
-                'private.google_play_void_scan_state'
+                'private.google_play_void_scan_state',
+                'private.google_play_lifecycle_activation'
               ] || case
                 when to_regclass('private.google_play_token_replacements') is not null
                   then array['private.google_play_token_replacements',
@@ -114,5 +120,8 @@ jobs:
           $$;
           SQL
 
-          psql -X -v ON_ERROR_STOP=1 \
-            -f supabase/tests/google_play_refund_preserves_other_token.sql
+          for proof_file in supabase/tests/google_play_*.sql; do
+            psql -X -v ON_ERROR_STOP=1 -f "$proof_file"
+          done
+
+          bash supabase/tests/google_play_refund_lock_race.sh
