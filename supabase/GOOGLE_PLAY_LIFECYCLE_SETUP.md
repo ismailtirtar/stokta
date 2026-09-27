@@ -24,7 +24,13 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
    `google_play_refund_fallback.sql` senaryolarını çalıştırın. İlk aşama eski
    RPC'yi çalışır tutarken yeni gözlemi kapatmalı; aktivasyon sonrası ACK
    kapısı, önceden iade ve B hakkı açıldıktan sonraki iade A'yı korumalıdır.
-2. Google Cloud'da Android Publisher API'nin etkinliğini, Play Console API access hesabının doğru projeye bağlı ve abonelik/iadeyi okuma ile ACK yetkilerini doğrulayın; mevcut canlı izinleri varsaymayın. Ardından Supabase Edge secret'larını ekleyin:
+2. Google Cloud projesinde Google Play Developer API'nin etkinliğini,
+   Publisher servis hesabının Play Console > Kullanıcılar ve izinler bölümüne
+   davet edildiğini ve finansal verileri, siparişleri ve iptal anketi
+   yanıtlarını görüntüleme ile siparişleri ve abonelikleri yönetme
+   yetkilerini aldığını doğrulayın; canlı izinleri varsaymayın.
+   Geliştirici hesabının Cloud projesine ayrıca bağlanması gerekmez.
+   Ardından Supabase Edge secret'larını ekleyin:
    `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (mevcut Publisher servis hesabı),
    `GOOGLE_PLAY_TOKEN_ENCRYPTION_KEY` (tam 32 rastgele byte'ın standart
    Base64 karşılığı), `GOOGLE_PLAY_RECONCILE_SECRET` (en az 32 rastgele
@@ -179,6 +185,8 @@ birleştirilmesi yaşam döngüsünü etkinleştirmez.
 
 ## Kaynaklar
 
+- Google Play Developer API kurulumu:
+  https://developers.google.com/android-publisher/getting_started
 - Google Play RTDN: https://developer.android.com/google/play/billing/rtdn-reference
 - Google Play abonelik yaşam döngüsü:
   https://developer.android.com/google/play/billing/lifecycle/subscriptions
