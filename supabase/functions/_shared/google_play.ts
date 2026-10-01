@@ -307,10 +307,14 @@ export function validateSubscriptionResponse(
   const autoRenewingPlan = lineItem.autoRenewingPlan;
   let autoRenewEnabled: boolean | null = null;
   if (autoRenewingPlan !== undefined && autoRenewingPlan !== null) {
-    if (!isRecord(autoRenewingPlan) || typeof autoRenewingPlan.autoRenewEnabled !== "boolean") {
+    if (!isRecord(autoRenewingPlan)
+      || (autoRenewingPlan.autoRenewEnabled !== undefined
+        && typeof autoRenewingPlan.autoRenewEnabled !== "boolean")) {
       throw new GooglePlayError("INVALID_RESPONSE", 502, "Google Play yenileme bilgisi geçersiz");
     }
-    autoRenewEnabled = autoRenewingPlan.autoRenewEnabled;
+    // Publisher uses ProtoJSON: a false scalar can be omitted from a present
+    // auto-renewing plan after cancellation. Keep malformed values invalid.
+    autoRenewEnabled = autoRenewingPlan.autoRenewEnabled ?? false;
   } else if (timestampRequired) {
     throw new GooglePlayError("INVALID_PURCHASE", 400, "Desteklenmeyen Google Play plan türü");
   }

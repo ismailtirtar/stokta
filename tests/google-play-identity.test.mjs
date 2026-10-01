@@ -98,3 +98,44 @@ test("ambiguous or malformed predecessor context is never accepted", () => {
     outOfAppPurchaseContext: { expiredPurchaseToken: "bad" },
   }), account, profile, now, false), { code: "INVALID_RESPONSE" });
 });
+
+test("canceled and expired purchases accept the omitted false renewal default", () => {
+  for (const [state, entitled] of [
+    ["SUBSCRIPTION_STATE_CANCELED", true],
+    ["SUBSCRIPTION_STATE_EXPIRED", false],
+  ]) {
+    const raw = purchase({
+      subscriptionState: state,
+      acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+    });
+    raw.lineItems[0].autoRenewingPlan = {};
+    if (state === "SUBSCRIPTION_STATE_EXPIRED") {
+      raw.lineItems[0].expiryTime = "2026-09-23T11:59:00Z";
+    }
+    const verified = validateSubscriptionResponse(raw, account, profile, now, false);
+    assert.equal(verified.autoRenewEnabled, false);
+    assert.equal(verified.entitled, entitled);
+  }
+});
+
+test("explicit false renewal retains the current canceled paid period", () => {
+  const raw = purchase({ subscriptionState: "SUBSCRIPTION_STATE_CANCELED" });
+  raw.lineItems[0].autoRenewingPlan = { autoRenewEnabled: false };
+  const verified = validateSubscriptionResponse(raw, account, profile, now, false);
+  assert.equal(verified.autoRenewEnabled, false);
+  assert.equal(verified.entitled, true);
+});
+
+test("renewal defaults do not accept malformed plans or nonboolean values", () => {
+  for (const value of [[], "", false, { autoRenewEnabled: null },
+    { autoRenewEnabled: "false" }, { autoRenewEnabled: 0 }]) {
+    const raw = purchase({ subscriptionState: "SUBSCRIPTION_STATE_CANCELED" });
+    raw.lineItems[0].autoRenewingPlan = value;
+    assert.throws(() => validateSubscriptionResponse(raw, account, profile, now, false),
+      { code: "INVALID_RESPONSE" });
+  }
+  const raw = purchase({ subscriptionState: "SUBSCRIPTION_STATE_CANCELED" });
+  delete raw.lineItems[0].autoRenewingPlan;
+  assert.throws(() => validateSubscriptionResponse(raw, account, profile, now, false),
+    { code: "INVALID_PURCHASE" });
+});
