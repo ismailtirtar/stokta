@@ -5,10 +5,12 @@
   },
   "build": {
     "development": {
+      "node": "22.23.3",
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
+      "node": "22.23.3",
       "distribution": "internal",
       "autoIncrement": true,
       "android": {
@@ -16,6 +18,7 @@
       }
     },
     "production": {
+      "node": "22.23.3",
       "autoIncrement": true,
       "buildArtifactPaths": [
         "android/app/build/outputs/mapping/**/mapping.txt"
