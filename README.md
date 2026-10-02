@@ -51,8 +51,7 @@ Expo Go yüklü Android telefonla ekrandaki QR kod okutularak test edilebilir.
 ## Doğrulama ve Android çıktısı
 
 ```bash
-npm run typecheck
-npm run export:android
+npm run verify:release
 npm run build:play
 ```
 
@@ -62,6 +61,10 @@ Kurulabilir APK için EAS hesabıyla:
 npx eas-cli login
 npm run build:apk
 ```
+
+`verify:release`, bağımlılık güvenliği, uygulama/Edge/strict tip kontrolleri, kaynak testleri, Expo uyumluluğu ve Android dışa aktarımını sırayla çalıştırır. Bir kontrol başarısızsa sonraki adımlar çalışmaz. Üretim derleme komutu, GitHub Android/Play doğrulama işleri ve standart EAS uzak derlemesinin `eas-build-post-install` aşaması bu kontrolü zorunlu tutar.
+
+Güncel güvenlik ve yayın engelleri [yayın doğrulama belgesinde](docs/RELEASE_READINESS_20261002.md) takip edilir; kaynak kontrollerinin geçmesi tek başına mağaza yayını için yeterli değildir.
 
 ## Arka uç kaynakları
 

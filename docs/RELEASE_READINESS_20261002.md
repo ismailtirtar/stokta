@@ -24,6 +24,18 @@ Mevcut Free planda sızdırılmış parola koruması kapalıdır. Supabase'in bu
 
 Yerel Android kaynak haritasında node-forge ve @expo/code-signing-certificates yoktur. Kurulu bağımlılık Expo CLI kod imzalama/sertifika doğrulama araçlarında kullanılır. Mobil pakette bulunmaması derleme araçlarının açık güvenlik danışmanını kapatmaz; üretim denetimi ve CI yayın kapısı başarısız kalır.
 
+## Güvenlik denetiminin derleme ve gönderime bağlanması
+
+2 Ekim kaynak incelemesinde `1d5941e` adayının güvenlik denetiminin yalnız `source-quality.yml` içinde çalıştığı görüldü. Aynı HEAD'in [kaynak işi](https://github.com/ismailtirtar/stokta/actions/runs/37050615186) audit nedeniyle başarısızken [Android doğrulaması](https://github.com/ismailtirtar/stokta/actions/runs/37050615173) ve [Play doğrulaması](https://github.com/ismailtirtar/stokta/actions/runs/37050615231) yalnız tip kontrolüyle başarılı olabiliyordu. Bu PR çalışmaları gerçek build/submit işlerini atladığından önceki başarısız audit tek başına bağımsız yayın işlerinin bu kontrolü zorunlu tuttuğunu kanıtlamıyordu.
+
+`verify:release` bağımlılık denetimi, uygulama/Edge/strict TypeScript, kaynak testleri, Expo bağımlılık kontrolü ve Android dışa aktarımını `&&` ile sıralar. İki yayın workflow'unun `validate` işi bu ön kontrolü zorunlu çalıştırır; `build` ve `submit` yalnız başarılı `validate` sonucundan sonra ilerler. `build:play` komutu EAS isteğinden önce aynı kontrolü çalıştırır; standart EAS Build'deki `eas-build-post-install` hook'u uzak derlemede de kontrolü tekrarlar. Custom EAS build workflow'ları kullanılmamaktadır; yeni bir custom build yolu eklenirse aynı kontrol onun adımlarına da açıkça eklenmelidir. Branch protection/ruleset ayarı değiştirilmedi.
+
+Eski audit denetleyicisine `{}` ve başarılı çıkış kodu verildiğinde yanlışlıkla başarılı sonuç ürettiği yerel süreç testiyle yeniden gösterildi. Güncel denetleyici rapor sürümü, kayıt biçimi, önem derecesi sayaçları, toplam ve çıkış kodunu doğrular; eksik veya tutarsız raporlar reddedilir. Kritik bulgular eski Metro istisnasından yararlanamaz. `node-forge` için istisna, sürüm etiketi değiştirme veya üçüncü taraf fork eklenmedi; lockfile SHA-256 `815f5d0791032b8a8556fd549de1f96e51ff644f5a6ec5f291b174b8670fd092` değişmedi.
+
+Yerel güvenlik regresyonları 29/29 geçti. Ön kontrolün her adımında enjekte edilen başarısızlık sonraki komutları durdurdu; temiz/tutarlı audit raporu kabul edildi, node-forge, bozuk/eksik raporlar ve kritik bulgu reddedildi. Üç TypeScript kontrolü ve Expo uyumluluk kontrolü geçti. Android dışa aktarımı 2.628.887 baytlık Hermes bundle üretti; metadata hedefi, dosyanın dolu olması ve Hermes başlığı doğrulandı. Bu çıktı imzalı AAB değildir. Gerçek `npm run verify:release` açık node-forge danışmanı nedeniyle exit 1 ile durdu; bu beklenen güvenlik engelidir, başarılı yayın doğrulaması değildir.
+
+2 Ekim npm kayıtlarında node-forge'un yayımlanmış güncel sürümü 1.4.0, yeni `@expo/code-signing-certificates` 0.0.7 sürümünün bağımlılığı da `node-forge ^1.4.0` idi. Resmî GHSA danışmanı yamalı sürüm bildirmiyor; upstream önerilen düzeltme PR'ı #1152 henüz açık. `image-size` 2.0.4 yayımlanmış olsa da kurulu Metro 0.83.3'ün varsayılan senkron işlevine dosya yolu gönderen çağrısı yeni API'yle aynı değildir; doğrulanmamış major override eklenmedi. Mevcut belgeli Metro/image-size istisnası genişletilmedi. Güvenli bağımlılık çözümü ve gerçek native/Play/mali saklama kapıları hâlâ açıktır.
+
 ## Canlı migrasyon geçmişi eşlemesi
 
 2 Ekim yalnız okuma karşılaştırmasında 26 canlı geçmiş kaydı ve 21 kaynak dosyası incelendi: 18 ad, 3 özgün sürüm zaman damgası ve 12 tam SQL SHA-256 özeti eşleşti.

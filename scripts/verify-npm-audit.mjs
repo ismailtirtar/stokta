@@ -45,8 +45,35 @@ if (report?.error) {
   fail("npm audit returned an error", [report.error.summary, report.error.detail].filter(Boolean));
 }
 
-const severe = Object.entries(report?.vulnerabilities ?? {})
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const severities = ["info", "low", "moderate", "high", "critical"];
+const counts = report?.metadata?.vulnerabilities;
+if (report?.auditReportVersion !== 2 || !isRecord(report.vulnerabilities) || !isRecord(counts)) {
+  fail("npm audit report is incomplete or has an unsupported format");
+}
+const vulnerabilities = Object.entries(report.vulnerabilities);
+for (const [name, value] of vulnerabilities) {
+  if (!isRecord(value) || value.name !== name || !severities.includes(value.severity) ||
+    !Array.isArray(value.via) || value.via.length === 0) {
+    fail(`invalid vulnerability record for ${name}`);
+  }
+}
+for (const severity of severities) {
+  const observed = vulnerabilities.filter(([, value]) => value.severity === severity).length;
+  if (!Number.isSafeInteger(counts[severity]) || counts[severity] < 0 || counts[severity] !== observed) {
+    fail(`npm audit ${severity} count does not match vulnerability records`);
+  }
+}
+if (counts.total !== vulnerabilities.length ||
+  (audit.status === 0) !== (counts.total === 0)) {
+  fail("npm audit totals or exit status do not match vulnerability records");
+}
+
+const severe = vulnerabilities
   .filter(([, value]) => value && ["high", "critical"].includes(value.severity));
+if (severe.some(([, value]) => value.severity === "critical")) {
+  fail("critical vulnerabilities cannot use the temporary allowlist");
+}
 if (severe.length === 0) {
   console.log("Production dependency audit passed with no high or critical findings.");
   process.exit(0);

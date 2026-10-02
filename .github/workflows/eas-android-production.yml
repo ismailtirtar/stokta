@@ -94,8 +94,8 @@ jobs:
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
           echo "eas_project_id=$EAS_PROJECT_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Verify TypeScript
-        run: npm run typecheck
+      - name: Verify release security, tests and Android bundle
+        run: npm run verify:release
 
   build:
     name: Build signed Android App Bundle
