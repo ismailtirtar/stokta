@@ -5,7 +5,7 @@ Bu belge, uygulama veri akışını Play Console Veri Güvenliği formuyla karş
 ## Genel yanıtlar
 
 - Uygulama kullanıcı verisi topluyor veya paylaşıyor mu? `Evet — topluyor`
-- Veriler üçüncü taraflarla paylaşılıyor mu? `Hayır`
+- Veriler üçüncü taraflarla paylaşılıyor mu? `Google Play doğrulama akışı ve uygulanabilir hizmet sağlayıcı/paylaşım istisnaları canlı Console beyanıyla karşılaştırılarak kesinleştirilmeli.`
 - Tüm veriler aktarım sırasında şifreleniyor mu? `Evet — HTTPS/TLS`
 - Kullanıcı veri silme talebinde bulunabilir mi? `Evet`
 - Uygulama hesap oluşturmayı destekliyor mu? `Evet — kullanıcı kendi işletmesini ve ilk yönetici hesabını, işletme yöneticisi çalışan hesaplarını oluşturur`

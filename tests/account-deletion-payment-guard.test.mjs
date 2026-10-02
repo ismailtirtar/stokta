@@ -5,7 +5,7 @@ import test from "node:test";
 
 const edge = readFileSync(new URL("../supabase/functions/delete-account/index.ts", import.meta.url), "utf8");
 const migration = readFileSync(
-  new URL("../supabase/migrations/20260924165747_atomic_account_deletion_payment_guard.sql", import.meta.url),
+  new URL("../supabase/migrations/20261002060744_atomic_account_deletion_payment_guard.sql", import.meta.url),
   "utf8",
 );
 

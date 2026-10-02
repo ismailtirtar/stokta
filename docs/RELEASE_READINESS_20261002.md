@@ -20,6 +20,20 @@ Mevcut Free planda sızdırılmış parola koruması kapalıdır. Supabase'in bu
 
 Yerel Android kaynak haritasında node-forge ve @expo/code-signing-certificates yoktur. Kurulu bağımlılık Expo CLI kod imzalama/sertifika doğrulama araçlarında kullanılır. Mobil pakette bulunmaması derleme araçlarının açık güvenlik danışmanını kapatmaz; üretim denetimi ve CI yayın kapısı başarısız kalır.
 
+## Canlı migrasyon geçmişi eşlemesi
+
+2 Ekim yalnız okuma karşılaştırmasında 26 canlı geçmiş kaydı ve 21 kaynak dosyası incelendi: 18 ad, 3 özgün sürüm zaman damgası ve 12 tam SQL SHA-256 özeti eşleşti.
+Adı eşleşen 6 SQL içerik farkı açık kaldı: `store_account_deletion`, `self_service_registration`, `google_play_subscription_billing`, `google_play_subscription_authoritative_entitlement`, `google_play_subscription_runtime_fix`, `platform_operator_write_access`.
+Yalnız kaynakta bulunan 3 ad: `platform_operator_mfa_aal2`, `web_payment_notifications`, `inactive_payment_grace_period`; yalnız canlı geçmişte bulunan 8 ad: 3 müşteri migrasyonu, 4 tek seferlik gönderim migrasyonu ve `enable_pg_net_for_google_play_reconcile`.
+
+| Migrasyon | Kaynak sürümü | Canlı geçmiş sürümü | Aynı SQL SHA-256 |
+|---|---|---|---|
+| `atomic_account_deletion_payment_guard` | `20261002060744` (eski ad: `20260924165747`) | `20261002060744` | `d6559ccef2ef38ae875feba154aa5a4eaeefe547166d8352d92fd75552cba1b5` |
+| `google_play_lifecycle_reconciliation` | `20260923090000` | `20260929214535` | `25d385fd78ca16866a7edf70bec5b2a1217c56586fa47b07c95f32be222dda7c` |
+
+Yalnız atomik silme dosyasının kimliği hizalandı; tek SQL ifadesinin içeriği ve canlı geçmiş değiştirilmedi. Diğer dosyalar, özellikle runtime düzeltmeleri arasındaki kronoloji değişebileceğinden yeniden adlandırılmadı.
+CLI `db push` ve dry-run çalıştırılmadı; eski geçmiş farkları uzlaştırılmadan genel dağıtım güvenli sayılmaz. Son commit'te iki izole DB workflow'u yeniden geçmeli: tam migrasyon replay'i, silme/ödeme yarışının iki kilit sırası ve Google Play iade yarışı.
+
 ## Açık yayın kapıları
 
 | Kapı | Tamamlanma ölçütü |
@@ -31,7 +45,7 @@ Yerel Android kaynak haritasında node-forge ve @expo/code-signing-certificates 
 | Bekleyen satın alma iptali ve tekrar deneme | Gerçek Google testinde bekleyen/terk edilmiş token hak açmamalı; sonraki başarılı satın alma doğru hesaba bağlanmalı |
 | IBAN ile birlikte kullanım | İzole DB provasında onaylı bağımsız IBAN dönemi Play hold/expiry/refund sonrasında korunmalı; eski sipariş iadesi yeni geçerli siparişi iptal etmemeli |
 | Hesap silme | Atomik DB işlemi, kalıcı Auth cleanup retry, PDF/audit temizliği ve bağımsız yenilenen abonelik kontrolü sınanmalı; ödeme bağlantılı silme talebi tamamlanabilir, açık ve yetkili inceleme yoluna sahip olmalı |
-| Saklama ve gizlilik | Şifreli token saklama, satın alma geçmişi ve mali kayıtların silme/inceleme davranışı uygulama, public politika ve Play Veri Güvenliği beyanıyla eşleşmeli; çözümlenmemiş mali saklama kararı tamamlandı sayılmamalı |
+| Saklama ve gizlilik | Kaynak politikada 30 gün içinde koşulsuz silme sözü değerlendirme/yanıt yükümlülüğü olarak düzeltildi; public site metni ayrıca hizalanıp doğrulanmalı. Şifreli token saklama, satın alma geçmişi ve mali kayıtların silme/inceleme davranışı uygulama, public politika ve Play Veri Güvenliği beyanıyla eşleşmeli; çözümlenmemiş mali saklama kararı tamamlandı sayılmamalı |
 | Bildirim dayanıklılığı | Push kimliği/audience korunarak expiration/retry/dead-letter/alarmlar canlı Google Cloud üzerinden doğrulanmalı |
 | Yeni Android sürümü | Tam CI geçen commit'ten tek imzalı AAB derlenmeli; artifact/commit/versionCode eşleşmeli; dahili testte o sürüm kurulup temel akışlar doğrulanmalı |
 | Açık test | Güncel Play Console koşulları ve dahili test sonuçları doğrulanıp sürüm açık teste ilerletilmeli; yeni cihaz/kullanıcı geri bildirimi alınmalı |
