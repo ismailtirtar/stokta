@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 10
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-      BUILD_ID: 190ad668-20ab-4e5d-827f-e16471007a9d
+      EXPECTED_SOURCE_COMMIT: e06b5b08b6b811fd427290831677565071602e0b
     steps:
       - name: Check out diagnostic source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -40,7 +40,7 @@ jobs:
           set -euo pipefail
           test -n "$EXPO_TOKEN"
           mkdir -p diagnostics
-          if ! eas build:view "$BUILD_ID" --json > "$RUNNER_TEMP/stokdas-eas-build-private.json"; then
+          if ! eas build:list --platform android --git-commit-hash "$EXPECTED_SOURCE_COMMIT" --limit 1 --json --non-interactive > "$RUNNER_TEMP/stokdas-eas-build-private.json"; then
             node -e 'const fs=require("node:fs");let text=fs.readFileSync(process.env.RUNNER_TEMP+"/stokdas-eas-build-private.json","utf8");text=text.split(process.env.EXPO_TOKEN).join("[REDACTED]").replace(/https?:\/\/[^\s]+/g,"[URL]");console.error(text);'
             exit 1
           fi
@@ -48,14 +48,16 @@ jobs:
           import assert from 'node:assert/strict';
           import { readFileSync, writeFileSync } from 'node:fs';
           import { join } from 'node:path';
-          const build = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'stokdas-eas-build-private.json'), 'utf8'));
-          assert.equal(build.id, process.env.BUILD_ID);
+          const candidates = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'stokdas-eas-build-private.json'), 'utf8'));
+          assert(Array.isArray(candidates) && candidates.length === 1);
+          const build = candidates[0];
+          assert.match(build.id, /^[0-9a-f-]{36}$/);
           assert.equal(build.app?.id, '6d9c0250-c796-4458-9fdb-99e50b690c3b');
           assert.equal(build.appIdentifier, 'com.ismailtirtar.stokta');
-          assert.equal(build.gitCommitHash, '98ec875e6faa0695b72abc746ac1f5ad0161698a');
+          assert.equal(build.gitCommitHash, process.env.EXPECTED_SOURCE_COMMIT);
           assert.equal(build.buildProfile, 'production');
           assert.equal(build.distribution, 'STORE');
-          assert.equal(build.status, 'ERRORED');
+          assert(['NEW', 'IN_QUEUE', 'IN_PROGRESS', 'FINISHED', 'ERRORED'].includes(build.status));
           const redact = (input) => String(input)
             .split(process.env.EXPO_TOKEN).join('[REDACTED]')
             .replace(/https?:\/\/[^\s"'<>]+/g, '[URL]')
@@ -68,7 +70,7 @@ jobs:
           };
           writeFileSync('diagnostics/build-metadata.json', redact(JSON.stringify(metadata, null, 2)) + '\n');
           console.log(redact(JSON.stringify(metadata)));
-          assert(Array.isArray(build.logFiles) && build.logFiles.length > 0 && build.logFiles.length <= 10);
+          assert(Array.isArray(build.logFiles) && build.logFiles.length <= 10);
           for (const [index, rawUrl] of build.logFiles.entries()) {
             const url = new URL(rawUrl);
             assert.equal(url.protocol, 'https:');
@@ -83,7 +85,7 @@ jobs:
       - name: Retain redacted diagnostic evidence
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
-          name: stokdas-eas-failure-190ad668
+          name: stokdas-eas-candidate-e06b5b0
           path: diagnostics/
           if-no-files-found: error
           retention-days: 30
