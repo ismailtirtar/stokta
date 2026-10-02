@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { nodeForgeFixture, patchPolicy, restoreOriginal } from "./helpers/node-forge-fixture.mjs";
 
 const source = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const packageJson = JSON.parse(source("package.json"));
 const allowlist = JSON.parse(source("security/npm-audit-allowlist.json"));
-const auditSource = source("scripts/verify-npm-audit.mjs");
 
 function report(vulnerabilities = {}) {
   const counts = { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 };
@@ -19,13 +19,11 @@ function report(vulnerabilities = {}) {
   return { auditReportVersion: 2, vulnerabilities, metadata: { vulnerabilities: counts } };
 }
 
-function runAudit(payload, status = 0) {
-  const root = mkdtempSync(join(tmpdir(), "stokdas-audit-"));
+function runAudit(payload, status = 0, change = () => {}) {
+  const fixture = nodeForgeFixture();
+  const { root } = fixture;
   try {
-    mkdirSync(join(root, "scripts"));
-    mkdirSync(join(root, "security"));
-    writeFileSync(join(root, "scripts", "verify-npm-audit.mjs"), auditSource);
-    writeFileSync(join(root, "security", "npm-audit-allowlist.json"), JSON.stringify(allowlist));
+    change(fixture);
     writeFileSync(join(root, "fixture.json"), JSON.stringify({ payload, status }));
     const stub = join(root, "fake-npm.cjs");
     writeFileSync(stub, `
@@ -50,7 +48,7 @@ process.exit(fixture.status);
       },
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    fixture.cleanup();
   }
 }
 
@@ -83,13 +81,66 @@ for (const [label, payload, status] of [
 const forge = {
   name: "node-forge",
   severity: "high",
-  via: [{ url: "https://github.com/advisories/GHSA-86w9-cpqp-85rv" }],
+  via: [{ url: patchPolicy.advisory, name: "node-forge", dependency: "node-forge", severity: "high", range: "<=1.4.0" }],
+  nodes: patchPolicy.installPaths,
 };
 
-test("node-forge imza doğrulama açığı yayın izni alamaz", () => {
-  const result = runAudit(report({ "node-forge": forge }), 1);
+test("Yamasız node-forge imza doğrulama açığı yayın izni alamaz", () => {
+  const result = runAudit(report({ "node-forge": forge }), 1, ({ packageRoot }) => restoreOriginal(packageRoot));
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /GHSA-86w9-cpqp-85rv/);
+  assert.match(result.stderr, /node-forge mitigation was not verified/);
+});
+
+test("Yalnız doğrulanmış node-forge yaması ve bilinen Expo zinciri geçer", () => {
+  const payload = report({
+    "node-forge": forge,
+    "@expo/code-signing-certificates": { name: "@expo/code-signing-certificates", severity: "high", via: ["node-forge"], nodes: patchPolicy.auditNodes["@expo/code-signing-certificates"] },
+    "@expo/cli": { name: "@expo/cli", severity: "high", via: ["node-forge", "@expo/code-signing-certificates"], nodes: patchPolicy.auditNodes["@expo/cli"] },
+    expo: { name: "expo", severity: "high", via: ["@expo/cli"], nodes: patchPolicy.auditNodes.expo },
+  });
+  const result = runAudit(payload, 1);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /60 RSA parser cases/);
+  assert.match(result.stderr, /npm audit still flags the published version/);
+});
+
+for (const [label, changed] of [
+  ["yeni danışman", { ...forge, via: [...forge.via, { url: "https://github.com/advisories/GHSA-new-advisory" }] }],
+  ["yanlış danışman kaynağı", { ...forge, via: [{ ...forge.via[0], dependency: "different-package" }] }],
+  ["kapsanmayan kurulum", { ...forge, nodes: [...forge.nodes, "node_modules/other/node_modules/node-forge"] }],
+  ["kritik bulgu", { ...forge, severity: "critical" }],
+]) {
+  test(`Doğrulanmış yama değiştirilmiş bulguyu kapsamaz: ${label}`, () => {
+    assert.equal(runAudit(report({ "node-forge": changed }), 1).status, 1);
+  });
+}
+
+test("Metro istisnası node-forge'un farklı tüketicisini kapsamaz", () => {
+  const result = runAudit(report({ "node-forge": forge, metro: { name: "metro", severity: "high", via: ["node-forge"] } }), 1);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /uncovered node-forge consumer chain/);
+});
+
+test("İndirekt bulgu eksik veya döngülü danışman zinciriyle geçemez", () => {
+  for (const via of [["node-forge"], ["expo"]]) {
+    const result = runAudit(report({ expo: { name: "expo", severity: "high", via } }), 1);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /missing or cyclic advisory provenance/);
+  }
+});
+
+test("Temiz audit yanıtı bile uygulanmamış yamayı gizleyemez", () => {
+  const result = runAudit(report(), 0, ({ packageRoot }) => restoreOriginal(packageRoot));
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /unapplied patch/);
+});
+
+test("Süresi dolan node-forge kararı audit kapısını kapatır", () => {
+  const result = runAudit(report({ "node-forge": forge }), 1, ({ root }) => {
+    writeFileSync(join(root, "security/node-forge-patch.json"), JSON.stringify({ ...patchPolicy, expiresOn: "2000-01-01" }));
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /review expired/);
 });
 
 test("Bulgu içeren rapor başarılı çıkış koduyla gizlenemez", () => {

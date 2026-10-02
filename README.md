@@ -64,6 +64,8 @@ npm run build:apk
 
 `verify:release`, bağımlılık güvenliği, uygulama/Edge/strict tip kontrolleri, kaynak testleri, Expo uyumluluğu ve Android dışa aktarımını sırayla çalıştırır. Bir kontrol başarısızsa sonraki adımlar çalışmaz. Üretim derleme komutu, GitHub Android/Play doğrulama işleri ve standart EAS uzak derlemesinin `eas-build-post-install` aşaması bu kontrolü zorunlu tutar.
 
+`npm ci`, sabitlenmiş node-forge 1.4.0 için kaynak ve iki tarayıcı dosyasına kontrollü yerel yamayı `postinstall` aşamasında uygular. Audit kapısı, 59 dosyanın bütünlüğünü, Expo'nun kullandığı gerçek paket yollarını ve 60 RSA imza ayrıştırma vakasını yeniden doğrular; eksik yama veya değiştirilmiş paket yayını durdurur. Ham `npm audit` yayımlanmış sürümü hâlâ açık olarak bildirir. Bu yalnız GHSA-86w9-cpqp-85rv için doğrulanmış, 2 Kasım 2026'da yeniden inceleme gerektiren yerel azaltımdır; [yama kapsamı ve kaldırma adımları](security/node-forge-patch.md) belgelenmiştir.
+
 Güncel güvenlik ve yayın engelleri [yayın doğrulama belgesinde](docs/RELEASE_READINESS_20261002.md) takip edilir; kaynak kontrollerinin geçmesi tek başına mağaza yayını için yeterli değildir.
 
 ## Arka uç kaynakları
