@@ -1,0 +1,84 @@
+name: Stokdaş EAS build diagnostics
+
+on:
+  push:
+    branches:
+      - diagnostics/stokdas-eas-build-190ad668
+    paths:
+      - .github/workflows/eas-build-diagnostics.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Read failed EAS build logs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      BUILD_ID: 190ad668-20ab-4e5d-827f-e16471007a9d
+    steps:
+      - name: Check out diagnostic source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22
+      - name: Set up EAS CLI
+        uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385
+        with:
+          eas-version: 23.0.0
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Fetch and redact existing failed build evidence
+        run: |
+          set -euo pipefail
+          test -n "$EXPO_TOKEN"
+          mkdir -p diagnostics
+          eas build:view "$BUILD_ID" --json > "$RUNNER_TEMP/stokdas-eas-build-private.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const build = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'stokdas-eas-build-private.json'), 'utf8'));
+          assert.equal(build.id, process.env.BUILD_ID);
+          assert.equal(build.app?.id, '6d9c0250-c796-4458-9fdb-99e50b690c3b');
+          assert.equal(build.appIdentifier, 'com.ismailtirtar.stokta');
+          assert.equal(build.gitCommitHash, '98ec875e6faa0695b72abc746ac1f5ad0161698a');
+          assert.equal(build.buildProfile, 'production');
+          assert.equal(build.distribution, 'STORE');
+          assert.equal(build.status, 'ERRORED');
+          const redact = (input) => String(input)
+            .split(process.env.EXPO_TOKEN).join('[REDACTED]')
+            .replace(/https?:\/\/[^\s"'<>]+/g, '[URL]')
+            .replace(/(EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY|SUPABASE_SERVICE_ROLE_KEY|EXPO_TOKEN|PASSWORD|SECRET)[^\n]*/gi, '$1=[REDACTED]');
+          const metadata = {
+            id: build.id, status: build.status, appIdentifier: build.appIdentifier,
+            gitCommitHash: build.gitCommitHash, appVersion: build.appVersion,
+            appBuildVersion: build.appBuildVersion, error: build.error,
+            logFileCount: build.logFiles?.length ?? 0,
+          };
+          writeFileSync('diagnostics/build-metadata.json', redact(JSON.stringify(metadata, null, 2)) + '\n');
+          console.log(redact(JSON.stringify(metadata)));
+          assert(Array.isArray(build.logFiles) && build.logFiles.length > 0 && build.logFiles.length <= 10);
+          for (const [index, rawUrl] of build.logFiles.entries()) {
+            const url = new URL(rawUrl);
+            assert.equal(url.protocol, 'https:');
+            assert.equal(url.hostname, 'storage.googleapis.com');
+            const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+            assert(response.ok, 'Could not read EAS log: HTTP ' + response.status);
+            const content = redact(await response.text());
+            writeFileSync('diagnostics/build-log-' + index + '.txt', content);
+            console.log('EAS log ' + index + ':\n' + content.split('\n').slice(-100).join('\n'));
+          }
+          NODE
+      - name: Retain redacted diagnostic evidence
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: stokdas-eas-failure-190ad668
+          path: diagnostics/
+          if-no-files-found: error
+          retention-days: 30
