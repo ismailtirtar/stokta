@@ -1,0 +1,48 @@
+# Stokdaş ilk kararlı yayın doğrulaması
+
+Bu belge doğrulanmış sonuçları ve açık kapıları ayırır. Kaynak CI testleri gerçek Google Play lisans testlerinin yerine geçmez. Bir PR'ın taslak olması veya bir AAB'ın derlenmesi, canlı sürümün yayınlandığı anlamına gelmez.
+
+## Doğrulanmış sonuçlar
+
+| Kontrol | Kanıt | Sınır |
+|---|---|---|
+| İlk satın alma ve ACK | 1 Ekim gerçek lisans testi; ACK öncesi hak kapalı, ACK sonrası açık | Yeni birleşik Android sürümü ayrıca sınanmalı |
+| Geri yükleme, yenileme, dönem sonu iptal | 1 Ekim Google API, ledger ve telefon gözlemleri | Uygulama dışından yeniden alım ayrı kapıdır |
+| Etkin aboneliği iade edip hakkını kaldırma | 1 Ekim 17:20:29 UTC gerçek test siparişi; 17:20:36 UTC hak kapandı, 17:21:00 UTC yazma reddedildi; önceki bitiş 17:22:58 UTC | Gerçek para işlemi yapılmadı; lisans test siparişi |
+| Verilerin okunabilir kalması ve yazmanın kapanması | Kullanıcının 1 Ekim 20:23 telefon ekranları | “Ödeme bekliyor” etiketi Google PENDING durumunu kanıtlamaz |
+| Canlı periyodik uzlaştırma | DB gözlemi 2 Ekim 05:12:50 UTC; etkin 5 dakikalık cron, son altı iş başarılı; overdueCount=0, failedDueCount=0, void taraması 05:10:01 UTC | Cron başarılı kaydı tek başına HTTP işleme kanıtı değildir; sağlık çıktısıyla birlikte değerlendirildi |
+| Operatör MFA ve yetki sınırı | 2 Ekim READ ONLY + ROLLBACK matrisi 7/7: oturumsuz, iptal edilmiş oturum, yanlış rol, AAL1 veya TOTP AMR eksikliği reddedildi; gerçek TOTP/AAL2 operatör okumaya yetkili. 18 hassas tabloda anon/authenticated CRUD erişimi yok; servis RPC'leri bu rollere kapalı | Hosted MFA kayıt/doğrulama ayarları bu oturumda okunmadı; yeni Android sürümünde rol davranışları ayrıca sınanmalı |
+| Yamalı bağımlılıklar | 2 Ekim brace-expansion 1.1.21 / 2.1.7 / 5.0.12 ve undici 6.28.1 aynı ana sürümlerle sabitlendi; temiz npm ci, strict/Edge tipleri, Expo uyumluluğu ve Android dışa aktarımı geçti | Expo SDK yükseltilmedi; node-forge danışmanı hâlâ denetimi başarısız kılıyor |
+
+Canlı işlev sürümleri: verify-play-subscription v10, google-play-rtdn v4, google-play-reconcile v3. Token kasasında 3 kayıt var; 6 eski hash-only ledger kaydı periyodik olarak sorgulanamıyor. Bu başlangıç farkı gizlenmemeli.
+
+Mevcut Free planda sızdırılmış parola koruması kapalıdır. Supabase'in bu koruması Pro ve üzeri planlarda sunulur. Mevcut parola kuralları ve hız sınırları aynı korumanın yerine geçtiği olarak değerlendirilmez; yalnız bu uyarı için ücretli yükseltme yapılmadı. `pg_net` uzantısı taşınabilir değildir; danışman uyarısını silmek için yapılandırması değiştirilmedi.
+
+Yerel Android kaynak haritasında node-forge ve @expo/code-signing-certificates yoktur. Kurulu bağımlılık Expo CLI kod imzalama/sertifika doğrulama araçlarında kullanılır. Mobil pakette bulunmaması derleme araçlarının açık güvenlik danışmanını kapatmaz; üretim denetimi ve CI yayın kapısı başarısız kalır.
+
+## Açık yayın kapıları
+
+| Kapı | Tamamlanma ölçütü |
+|---|---|
+| Kaynak bütünlüğü | Güncel main ile #17/#20/#21 ve gizlilik/silme düzeltmeleri birleştirilmeli; main'deki destek yönlendirmesi korunmalı; birleşik commit'in tüm CI kontrolleri geçmeli |
+| Bağımlılık güvenliği | Üretim bağımlılık denetimi geçmeli. 2 Ekim kontrolünde node-forge için GHSA-86w9-cpqp-85rv açık; resmi danışmanda <=1.4.0 etkilenmiş, yamalı sürüm yok. Denetim istisnası eklenerek gizlenmedi; resmi düzeltme veya doğrulanmış uyumlu bağımlılık değişikliği gerekiyor |
+| Play Store üzerinden yeniden abonelik | Gerçek lisans testinde yeni tokenın eski değişmez sahibine bağlandığı, ACK aldığı ve doğru işletmenin erişiminin açıldığı gösterilmeli |
+| Ödeme başarısızlığı ve düzelmesi | Gerçek grace/hold/recovery testinde grace erişimi korunmalı, hold yazmayı kapatmalı, ACTIVE/ACK iyileşmesi erişimi açmalı |
+| Bekleyen satın alma iptali ve tekrar deneme | Gerçek Google testinde bekleyen/terk edilmiş token hak açmamalı; sonraki başarılı satın alma doğru hesaba bağlanmalı |
+| IBAN ile birlikte kullanım | İzole DB provasında onaylı bağımsız IBAN dönemi Play hold/expiry/refund sonrasında korunmalı; eski sipariş iadesi yeni geçerli siparişi iptal etmemeli |
+| Hesap silme | Atomik DB işlemi, kalıcı Auth cleanup retry, PDF/audit temizliği ve bağımsız yenilenen abonelik kontrolü sınanmalı; ödeme bağlantılı silme talebi tamamlanabilir, açık ve yetkili inceleme yoluna sahip olmalı |
+| Saklama ve gizlilik | Şifreli token saklama, satın alma geçmişi ve mali kayıtların silme/inceleme davranışı uygulama, public politika ve Play Veri Güvenliği beyanıyla eşleşmeli; çözümlenmemiş mali saklama kararı tamamlandı sayılmamalı |
+| Bildirim dayanıklılığı | Push kimliği/audience korunarak expiration/retry/dead-letter/alarmlar canlı Google Cloud üzerinden doğrulanmalı |
+| Yeni Android sürümü | Tam CI geçen commit'ten tek imzalı AAB derlenmeli; artifact/commit/versionCode eşleşmeli; dahili testte o sürüm kurulup temel akışlar doğrulanmalı |
+| Açık test | Güncel Play Console koşulları ve dahili test sonuçları doğrulanıp sürüm açık teste ilerletilmeli; yeni cihaz/kullanıcı geri bildirimi alınmalı |
+
+2 Ekim bulut tarayıcısı Google Cloud için “Site Unavailable” döndürdü. Bu, ayarların doğrulandığı veya hizmetin genel olarak kapalı olduğu anlamına gelmez. Güncel Play track/versionCode bu oturumda doğrulanmadı.
+
+## Kaynaklar
+
+- https://developer.android.com/google/play/billing/test
+- https://developer.android.com/google/play/billing/lifecycle/subscriptions
+- https://support.google.com/googleplay/android-developer/answer/13327111?hl=en-EN
+- https://github.com/advisories/GHSA-86w9-cpqp-85rv
+
+Bu yayın kapıları kapanmadan proje %100 tamamlandı olarak işaretlenmez.

@@ -7,8 +7,11 @@ on:
     paths:
       - 'supabase/schema.sql'
       - 'supabase/migrations/**'
+      - 'supabase/functions/delete-account/**'
+      - 'supabase/ops/account_deletion_activate.sql'
       - 'tests/account-deletion-payment-db.sql'
       - 'tests/account-deletion-payment-race.sh'
+      - 'tests/account-deletion-payment-guard.test.mjs'
       - '.github/workflows/account-deletion-db-proof.yml'
   workflow_dispatch:
 

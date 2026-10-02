@@ -19,15 +19,41 @@ type Business = {
 };
 
 type Props = { visible: boolean; onClose: () => void };
+type DeletionRequest = {
+  id: string; status: "requested" | "under_review"; scope: "account" | "organization";
+  requestedAt: string; paymentStatus: "pending" | "reviewed";
+  username: string | null; organizationName: string | null;
+};
 
 export default function PlatformModal({ visible, onClose }: Props) {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deletionRequests, setDeletionRequests] = useState<DeletionRequest[]>([]);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [deletionQueueError, setDeletionQueueError] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     void loadBusinesses();
+    void loadDeletionRequests();
   }, [visible]);
+
+  async function loadDeletionRequests() {
+    const { data, error } = await supabase.rpc("platform_list_account_deletion_requests");
+    setDeletionQueueError(Boolean(error));
+    setDeletionRequests(error ? [] : data as DeletionRequest[]);
+  }
+
+  async function reviewDeletionRequest(requestId: string) {
+    setReviewingId(requestId);
+    const { error } = await supabase.rpc("platform_review_account_deletion_request", { p_request_id: requestId });
+    setReviewingId(null);
+    if (error) {
+      Alert.alert("Talep güncellenemedi", error.message);
+      return;
+    }
+    await loadDeletionRequests();
+  }
 
   async function loadBusinesses() {
     setLoading(true);
@@ -76,6 +102,22 @@ export default function PlatformModal({ visible, onClose }: Props) {
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={styles.businessCard}>
+              <Text style={styles.businessName}>Hesap silme talepleri</Text>
+              <Text style={styles.period}>Ödeme kayıtları korunur. İncelemeye alma hesabı silmez. Nihai silme ve saklama kararı destek üzerinden ayrıca tamamlanmalıdır.</Text>
+              {deletionQueueError ? <Text style={styles.usage}>Talep kuyruğu alınamadı. TOTP oturumunu doğrulayarak yeniden açın.</Text>
+                : !deletionRequests.length ? <Text style={styles.usage}>Bekleyen talep yok.</Text> : null}
+              {deletionRequests.map((request) => <View key={request.id} style={styles.businessCard}>
+                <Text style={styles.businessName}>{request.organizationName ?? "İşletme"} · @{request.username ?? "kullanıcı"}</Text>
+                <Text style={styles.usage}>{request.scope === "organization" ? "İşletme ve hesaplar" : "Çalışan hesabı"} · {request.status === "under_review" ? "İnceleniyor" : "Talep alındı"}</Text>
+                <Text style={styles.period}>{new Date(request.requestedAt).toLocaleDateString("tr-TR")} · Ödeme kaydı: {request.paymentStatus === "pending" ? "Bekleyen" : "İncelenmiş"}</Text>
+                <Text selectable style={styles.period}>Talep: {request.id}</Text>
+                {request.status === "requested" ? <Pressable style={styles.activateButton}
+                  disabled={Boolean(reviewingId)} onPress={() => void reviewDeletionRequest(request.id)}>
+                  <Text style={styles.activateText}>{reviewingId === request.id ? "Güncelleniyor…" : "İncelemeye al"}</Text>
+                </Pressable> : null}
+              </View>)}
+            </View>
             <View style={styles.summaryRow}>
               <View><Text style={styles.summaryLabel}>TOPLAM İŞLETME</Text><Text style={styles.summaryValue}>{businesses.length}</Text></View>
               <View style={styles.selfServiceNote}><Text style={styles.selfServiceText}>Yeni işletmeler kayıt ekranından açılır</Text></View>
@@ -104,7 +146,7 @@ export default function PlatformModal({ visible, onClose }: Props) {
 }
 
 function statusLabel(status: Business["subscription_status"]) {
-  return { trial: "DENEME", active: "AKTİF", past_due: "ÖDEME BEKLİYOR", suspended: "ASKIDA", canceled: "İPTAL" }[status];
+  return { trial: "DENEME", active: "AKTİF", past_due: "ERİŞİM KAPALI", suspended: "ASKIDA", canceled: "İPTAL" }[status];
 }
 
 function statusTone(status: Business["subscription_status"]) {

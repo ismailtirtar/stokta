@@ -19,10 +19,12 @@ function edgeHarness(deletionResult, {
   banUserError = null,
   revokeUserSessionsError = null,
   lookupFailureIds = [],
+  failCompletionOnce = false,
+  initiallyDelayed = false,
 } = {}) {
   const events = [];
   const jobs = deletionResult.data?.batchId
-    ? authUserIds.map((authUserId) => ({ batchId: deletionResult.data.batchId, authUserId, kind: "identity" }))
+    ? authUserIds.map((authUserId) => ({ batchId: deletionResult.data.batchId, authUserId, kind: "identity", delayed: initiallyDelayed }))
     : [];
   if (deletionResult.data?.batchId && verificationUserId) jobs.push({
     batchId: deletionResult.data.batchId,
@@ -41,6 +43,7 @@ function edgeHarness(deletionResult, {
   let currentBanUserError = banUserError;
   let currentRevokeUserSessionsError = revokeUserSessionsError;
   let attemptClock = 0;
+  let completionFailure = failCompletionOnce;
   let handler;
   const caller = {
     id: "user-1",
@@ -85,11 +88,12 @@ function edgeHarness(deletionResult, {
       if (name === "service_delete_account_data") return deletionResult;
       if (name === "service_revoke_user_sessions") return { data: 1, error: currentRevokeUserSessionsError };
       if (name === "service_list_account_deletion_auth_jobs") {
-        return { data: jobs.filter((job) => !params.p_batch_id || job.batchId === params.p_batch_id)
+        return { data: jobs.filter((job) => !job.delayed && (!params.p_batch_id || job.batchId === params.p_batch_id))
           .sort((left, right) => (left.lastAttemptAt ?? -1) - (right.lastAttemptAt ?? -1))
           .slice(0, 25), error: null };
       }
       if (name === "service_complete_account_deletion_auth_job") {
+        if (completionFailure) { completionFailure = false; return { data: null, error: { code: "database_unavailable" } }; }
         const index = jobs.findIndex((job) => job.batchId === params.p_batch_id && job.authUserId === params.p_auth_user_id);
         if (index >= 0) jobs.splice(index, 1);
         return { data: index >= 0, error: null };
@@ -100,11 +104,15 @@ function edgeHarness(deletionResult, {
           job.attempts = (job.attempts ?? 0) + 1;
           job.lastErrorCode = params.p_error_code;
           job.lastAttemptAt = ++attemptClock;
+          job.delayed = true;
         }
         return { data: true, error: null };
       }
       if (name === "service_account_deletion_auth_job_health") {
         return { data: { pending: jobs.length, withFailures: jobs.filter((job) => job.attempts > 0).length }, error: null };
+      }
+      if (name === "service_account_deletion_auth_batch_pending") {
+        return { data: jobs.filter((job) => !params.p_batch_id || job.batchId === params.p_batch_id).length, error: null };
       }
       throw Error(`Unexpected RPC ${name}`);
     },
@@ -150,6 +158,7 @@ function edgeHarness(deletionResult, {
     setDeleteUserError: (error) => { currentDeleteUserError = error; },
     setBanUserError: (error) => { currentBanUserError = error; },
     setRevokeUserSessionsError: (error) => { currentRevokeUserSessionsError = error; },
+    makeRetriesDue: () => { for (const job of jobs) job.delayed = false; },
   };
 }
 
@@ -162,11 +171,13 @@ async function runEdge(deletionResult, options = {}) {
 test("pending and reviewed bank-transfer notices stop before Auth or database cleanup", async () => {
   for (const paymentStatus of ["pending", "reviewed"]) {
     const { response, events } = await runEdge({
-      data: { code: "PAYMENT_RECORDS_REQUIRE_REVIEW", paymentStatus },
+      data: { code: "PAYMENT_RECORDS_REQUIRE_REVIEW", paymentStatus, requestId: "request-1", requestStatus: "requested" },
       error: null,
     });
     assert.equal(response.status, 409);
-    assert.equal(response.body.code, "PAYMENT_RECORDS_REQUIRE_REVIEW");
+    assert.equal(response.body.code, "DELETION_REVIEW_REQUESTED");
+    assert.equal(response.body.requestId, "request-1");
+    assert.equal(response.body.deleted, undefined);
     assert.deepEqual(events.filter((event) => event.startsWith("ban:") || event.startsWith("delete-auth:")), []);
     assert.equal(events.at(-1), "rpc:service_delete_account_data");
   }
@@ -212,6 +223,7 @@ test("Auth failure persists an outbox job, and a service-role retry clears it", 
   assert.equal(harness.jobs.length, 1);
   assert.equal(harness.jobs[0].attempts, 1);
   harness.setDeleteUserError(null);
+  harness.makeRetriesDue();
   const retryResponse = await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key");
   assert.equal(retryResponse.status, 200);
   assert.equal(retryResponse.body.pending, false);
@@ -296,6 +308,7 @@ test("failed ban retains the job and never revokes or deletes Auth until retry",
   assert.equal(harness.events.includes("rpc:service_revoke_user_sessions"), false);
   assert.equal(harness.events.includes("delete-auth:user-1"), false);
   harness.setBanUserError(null);
+  harness.makeRetriesDue();
   const retry = await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key");
   assert.equal(retry.status, 200);
   assert.equal(harness.jobs.length, 0);
@@ -315,10 +328,43 @@ test("failed session revocation retains the job and never deletes Auth until ret
   assert.equal(harness.events.includes("ban:user-1"), true);
   assert.equal(harness.events.includes("delete-auth:user-1"), false);
   harness.setRevokeUserSessionsError(null);
+  harness.makeRetriesDue();
   const retry = await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key");
   assert.equal(retry.status, 200);
   assert.equal(harness.jobs.length, 0);
   assert.equal(harness.events.filter((event) => event === "delete-auth:user-1").length, 1);
+});
+
+test("a delayed job remains pending when no due jobs can be fetched", async () => {
+  const harness = edgeHarness({ data: { deleted: true, scope: "account", batchId: "batch-1" }, error: null }, { initiallyDelayed: true });
+  const first = await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key");
+  assert.equal(first.status, 503);
+  assert.equal(first.body.pending, true);
+  assert.equal(first.body.processed, 0);
+  assert.equal(first.body.health.pending, 1);
+  assert.equal(harness.events.includes("delete-auth:user-1"), false);
+  harness.makeRetriesDue();
+  assert.equal((await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key")).status, 200);
+});
+
+test("a crash after Auth deletion but before acknowledgement resumes without deleting twice", async () => {
+  const harness = edgeHarness({ data: { deleted: true, scope: "account", batchId: "batch-1" }, error: null }, { failCompletionOnce: true });
+  const first = await harness.invoke();
+  assert.equal(first.status, 503);
+  assert.equal(first.body.code, "AUTH_CLEANUP_PENDING");
+  assert.equal(first.body.dataDeleted, true);
+  assert.equal(harness.jobs.length, 1);
+  const second = await harness.invoke({ operation: "retry-auth-cleanup" }, "service-key");
+  assert.equal(second.status, 200);
+  assert.equal(harness.jobs.length, 0);
+  assert.equal(harness.events.filter((event) => event === "delete-auth:user-1").length, 1);
+});
+
+test("an unconfirmed payment request cannot be reported as accepted or completed", async () => {
+  const { response, events } = await runEdge({ data: { code: "PAYMENT_RECORDS_REQUIRE_REVIEW", paymentStatus: "pending" }, error: null });
+  assert.equal(response.status, 503);
+  assert.equal(response.body.deleted, undefined);
+  assert.equal(events.some((event) => event.startsWith("delete-auth:")), false);
 });
 
 test("SQL serializes payment INSERTs with its guard and rolls back database cleanup together", () => {

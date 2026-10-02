@@ -34,25 +34,32 @@ jobs:
           cache: npm
 
       - name: Install dependencies
+        id: install
         run: npm ci
 
       - name: Verify production dependency audit
         run: npm run audit:production
 
       - name: Verify application types
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run typecheck
 
-      - name: Verify billing Edge Function types
+      - name: Verify billing and account deletion Edge Function types
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run typecheck:edge
 
       - name: Verify strict TypeScript hygiene
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run typecheck:strict
 
       - name: Run contract tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm test
 
       - name: Verify Expo dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npx expo install --check
 
       - name: Export the Android bundle
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run export:android

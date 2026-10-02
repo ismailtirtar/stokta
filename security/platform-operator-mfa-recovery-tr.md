@@ -6,13 +6,14 @@ Bu prosedür yalnızca `profiles.is_platform_operator = true` olan Stokdaş hesa
 
 Stokdaş Supabase projesinin Auth yapılandırmasında aşağıdaki değerler açık olmalıdır:
 
-- `password_hibp_enabled = true`
 - `mfa_totp_enroll_enabled = true`
 - `mfa_totp_verify_enabled = true`
 
-Yerel Supabase ortamı için TOTP kayıt ve doğrulama bayrakları `supabase/config.toml` içinde de açık tutulur. Sızdırılmış parola koruması ise barındırılan projenin Auth ayarıdır; kaynak deposundaki yerel yapılandırma canlı `password_hibp_enabled` değerini kanıtlamaz.
+Yerel Supabase ortamı için TOTP kayıt ve doğrulama bayrakları `supabase/config.toml` içinde de açık tutulur. Kaynak deposundaki yerel yapılandırma bu canlı ayarların değerlerini kanıtlamaz.
 
-Yönetim API'si kullanılırsa önce mevcut Auth yapılandırması okunmalı, sonra yalnızca bu üç alan değiştirilmelidir. Proje referansı veya erişim belirteci kaynak koda, issue yorumuna ya da destek kaydına yazılmamalıdır.
+Supabase'in [sızdırılmış parola koruması](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection) Pro ve üzeri planlarda kullanılabilir. Stokdaş'ın mevcut Free projesinde bu koruma kapalıdır; sızdırılmış parolaların reddedildiği doğrulanmış kabul edilmemelidir. Pro veya üzeri bir plana geçilirse `password_hibp_enabled = true` ayrıca etkinleştirilip canlı olarak test edilmelidir. Uygulamadaki 8-72 karakter, büyük/küçük harf, rakam ve sembol şartı ile sunucudaki giriş ve parola kurtarma hız sınırları bu korumanın yerine geçmez.
+
+Yönetim API'si kullanılırsa önce mevcut Auth yapılandırması okunmalı, sonra yalnızca gerekli TOTP alanları değiştirilmelidir. Sızdırılmış parola koruması yalnız desteklenen planda ayrıca değiştirilir. Proje referansı veya erişim belirteci kaynak koda, issue yorumuna ya da destek kaydına yazılmamalıdır.
 
 ## İlk kurulum
 
@@ -56,7 +57,7 @@ Bu işlem mobil uygulamaya açık bir “MFA sıfırla” uç noktası eklenerek
 - Platform operatörü + AAL1, faktör var: TOTP doğrulama ekranı görünür; platform çağrıları reddedilir.
 - Platform operatörü + AAL2: platform işletme ve moderasyon işlemleri çalışır.
 - Süresi dolmuş, sahte veya canlı olmayan oturum: rol ve AAL değeri ne olursa olsun reddedilir.
-- Yeni kayıt/parola değişikliğinde sızdırılmış parola: Supabase Auth tarafından reddedilir.
+- Yeni kayıt/parola değişikliğinde parola şartı ve giriş/kurtarma hız sınırları kontrol edilir. Desteklenen planda sızdırılmış parola koruması açıksa, sızdırılmış parolanın Supabase Auth tarafından reddedildiği ayrıca test edilir; mevcut Free projesinde bu test yapılmış veya geçmiş sayılmaz.
 - Faktör kaldırıldıktan sonra: eski JWT hâlâ `aal2` yazsa bile canlı oturumun bağlı TOTP faktörü ve sunucudaki AAL değeri denetlendiği için platform çağrıları reddedilir; istemci oturumu yenileyip AAL1'e düşürür.
 
-Issue, canlı Auth ayarları okunup üç bayrak doğrulanmadan; yeni migration ve `manage-businesses` Edge Function Stokdaş projesine dağıtılmadan; yukarıdaki rol matrisi canlı veya eşdeğer bir test projesinde geçirilmeden kapatılmamalıdır.
+MFA issue'su, canlı TOTP kayıt ve doğrulama ayarları doğrulanmadan; yeni migration ve `manage-businesses` Edge Function Stokdaş projesine dağıtılmadan; yukarıdaki rol matrisi canlı veya eşdeğer bir test projesinde geçirilmeden kapatılmamalıdır. Sızdırılmış parola korumasının plan nedeniyle kullanılamadığı yayın kontrol kaydında ayrı bir sınırlama olarak tutulmalıdır; MFA doğrulaması bu korumanın etkin olduğu anlamına gelmez.

@@ -204,7 +204,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
   const subscriptionLabel = subscriptionStatus === "trial" ? "Deneme"
     : subscriptionStatus === "active" ? "Aktif"
     : subscriptionStatus === "inactive" ? "İnaktif"
-    : subscriptionStatus === "past_due" ? "Ödeme bekliyor"
+    : subscriptionStatus === "past_due" ? "Erişim kapalı"
     : subscriptionStatus === "suspended" ? "Askıda"
     : "İptal edildi";
 
@@ -385,15 +385,32 @@ export default function InventoryScreen({ session }: { session: Session }) {
 
   async function deleteAccount(confirmation: string, currentPassword: string) {
     setSaving(true);
-    const { error: deleteError } = await supabase.functions.invoke("delete-account", {
+    const { data: deletion, error: deleteError } = await supabase.functions.invoke("delete-account", {
       body: { confirmation, currentPassword },
     });
     setSaving(false);
     if (deleteError) {
+      try {
+        const result = await (deleteError as { context?: Response }).context?.clone().json() as
+          { code?: string; error?: string; dataDeleted?: boolean } | undefined;
+        if (result?.code === "DELETION_REVIEW_REQUESTED") {
+          Alert.alert("Silme talebi kaydedildi", result.error ?? "Ödeme kayıtları inceleniyor. Hesap henüz silinmedi.");
+          return;
+        }
+        if (result?.code === "AUTH_CLEANUP_PENDING" && result.dataDeleted === true) {
+          setAccountModal(false);
+          await supabase.auth.signOut({ scope: "local" });
+          Alert.alert("Giriş hesabı temizliği sürüyor", result.error ?? "Veriler silindi. Giriş kimliğinin temizliği sunucuda yeniden denenecek.");
+          return;
+        }
+      } catch { /* Fall through to the ordinary Edge error message. */ }
       Alert.alert("Hesap silinemedi", await edgeFunctionError(deleteError));
       return;
     }
-
+    if (deletion?.deleted !== true) {
+      Alert.alert("Silme doğrulanamadı", "Hesap silme işleminin tamamlandığı doğrulanamadı. Destek ile iletişime geçin.");
+      return;
+    }
     setAccountModal(false);
     await supabase.auth.signOut({ scope: "local" });
     Alert.alert("Silme tamamlandı", isAdmin ? "Çalışma alanı ve tüm hesaplar kalıcı olarak silindi." : "Hesabınız ve kişisel profil bilgileriniz silindi.");
@@ -437,7 +454,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
               accessibilityRole="button"
               accessibilityLabel="Google Play aboneliğini yenile"
             >
-              <Text style={styles.subscriptionActionText}>{["Ödeme bekliyor", "İnaktif", "Askıda"].includes(subscriptionLabel) ? "Google Play'de yönet" : "Google Play'den yenile"}</Text>
+              <Text style={styles.subscriptionActionText}>{["Erişim kapalı", "İnaktif", "Askıda"].includes(subscriptionLabel) ? "Google Play'de yönet" : "Google Play'den yenile"}</Text>
             </Pressable> : null}
           </View> : null}
           <View style={styles.statsGrid}>

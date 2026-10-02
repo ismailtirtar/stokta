@@ -115,17 +115,17 @@ Deno.serve(async (req: Request) => {
       }
 
       const { data: remaining, error: remainingError } = await admin.rpc(
-        "service_list_account_deletion_auth_jobs", { p_batch_id: batchId },
+        "service_account_deletion_auth_batch_pending", { p_batch_id: batchId },
       );
-      if (remainingError || !Array.isArray(remaining)) {
+      if (remainingError || typeof remaining !== "number" || !Number.isSafeInteger(remaining) || remaining < 0) {
         console.error("Account deletion Auth outbox verification failed", remainingError);
         return { failed: true, processed, pending: true };
       }
-      return { failed, processed, pending: remaining.length > 0 };
+      return { failed, processed, pending: remaining > 0 };
     };
 
-    // A trusted operator can retry up to 25 persisted jobs per call using the
-    // existing server-side service role key. No deleted profile is required.
+    // The scheduled server worker retries at most 25 due jobs. Only the actual
+    // service role bearer can invoke this path; an AAL2 user is not a bypass.
     if (token === serviceRoleKey) {
       const retryBody = await req.json() as { operation?: unknown; batchId?: unknown };
       if (!retryBody || typeof retryBody !== "object"
@@ -227,11 +227,17 @@ Deno.serve(async (req: Request) => {
 
     const deletion = deletionData as Record<string, unknown> | null;
     if (deletion?.code === "PAYMENT_RECORDS_REQUIRE_REVIEW") {
+      if (typeof deletion.requestId !== "string"
+        || (deletion.requestStatus !== "requested" && deletion.requestStatus !== "under_review")) {
+        return json(503, { error: "Silme talebi kaydedilemedi. Lütfen tekrar deneyin." });
+      }
+      // Keep non-2xx for installed clients that treat every successful invoke
+      // as completed deletion. The new client reads this specific request code.
       return json(409, {
-        code: "PAYMENT_RECORDS_REQUIRE_REVIEW",
-        error: deletion.paymentStatus === "pending"
-          ? "Ödeme bildiriminiz henüz inceleniyor. Hesap ve veri silme talebinizi tirtarismail@gmail.com adresine iletin."
-          : "Bu hesapla ilişkili incelenmiş ödeme kayıtları var. Hesap ve veri silme talebinizi tirtarismail@gmail.com adresine iletin.",
+        code: "DELETION_REVIEW_REQUESTED",
+        requestId: deletion.requestId,
+        requestStatus: deletion.requestStatus,
+        error: "Silme talebiniz kaydedildi. İlişkili ödeme kayıtları incelenmeden hesap ve verileriniz silinmez. Talep durumunu Hesabım > Hesabımı sil bölümünden takip edebilirsiniz.",
         supportEmail: "tirtarismail@gmail.com",
       });
     }
@@ -265,7 +271,8 @@ Deno.serve(async (req: Request) => {
     if (cleanup.failed || cleanup.pending) {
       return json(503, {
         code: "AUTH_CLEANUP_PENDING",
-        error: "Hesap verileri silindi; giriş kimliklerinin temizliği sürüyor. Lütfen tirtarismail@gmail.com adresine yazın.",
+        dataDeleted: true,
+        error: "Hesap verileri silindi; giriş kimliklerinin temizliği sıraya alındı ve sunucuda yeniden denenecek. Destek: tirtarismail@gmail.com",
         supportEmail: "tirtarismail@gmail.com",
       });
     }
