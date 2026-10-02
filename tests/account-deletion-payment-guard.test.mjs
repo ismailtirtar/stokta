@@ -21,8 +21,13 @@ function edgeHarness(deletionResult, {
   lookupFailureIds = [],
   failCompletionOnce = false,
   initiallyDelayed = false,
+  workerCredential = "rotated-service-key",
+  workerAuthorityError = null,
+  workerAuthorityHealth = { pending: 0, withFailures: 0 },
+  workerAuthorityThrows = false,
 } = {}) {
   const events = [];
+  const credentialClients = [];
   const jobs = deletionResult.data?.batchId
     ? authUserIds.map((authUserId) => ({ batchId: deletionResult.data.batchId, authUserId, kind: "identity", delayed: initiallyDelayed }))
     : [];
@@ -138,12 +143,28 @@ function edgeHarness(deletionResult, {
     .replace("(req: Request)", "(req)")
     .replace("(batchId: string | null)", "(batchId)")
     .replace("(code: string)", "(code)")
-    .replace("await req.json() as { operation?: unknown; batchId?: unknown }", "await req.json()")
+    .replace("as { operation?: unknown; batchId?: unknown } | null", "")
     .replace("await req.json() as { confirmation?: unknown; currentPassword?: unknown }", "await req.json()")
     .replace("deletionData as Record<string, unknown> | null", "deletionData");
   vm.runInNewContext(executable, {
     Deno: { env: { get: (name) => name === "SUPABASE_SERVICE_ROLE_KEY" ? "service-key" : "anon-key" }, serve: (fn) => { handler = fn; } },
-    createClient: (_url, key) => key === "service-key" ? adminClient : reauthClient,
+    createClient: (_url, key, options) => {
+      if (key === "service-key") return adminClient;
+      if (key === "anon-key" && !options.global?.headers.Authorization) return reauthClient;
+      credentialClients.push({ key, options });
+      return {
+        rpc: async (name) => {
+          events.push(`worker-authority:${name}`);
+          assert.equal(name, "service_account_deletion_auth_job_health");
+          if (workerAuthorityThrows) throw Error("Authority transport failure");
+          const authorized = key === workerCredential
+            && options.global.headers.Authorization === `Bearer ${workerCredential}`;
+          return authorized
+            ? { data: workerAuthorityHealth, error: workerAuthorityError }
+            : { data: null, error: { code: "42501" } };
+        },
+      };
+    },
     bearerToken: (req) => req.token,
     sessionIdFromAccessToken: () => "session-id",
     corsJsonHeaders: {},
@@ -151,9 +172,16 @@ function edgeHarness(deletionResult, {
     console: { error: () => {} },
   });
   return {
-    invoke: (body = { confirmation: caller.username, currentPassword: "password" }, token = "caller-token") =>
-      handler({ method: "POST", token, json: async () => body }),
+    invoke: (body = { confirmation: caller.username, currentPassword: "password" }, token = "caller-token") => {
+      const request = new Request("https://edge.example.test/delete-account", {
+        method: "POST",
+        body: body instanceof Error ? "{invalid-json" : JSON.stringify(body),
+      });
+      request.token = token;
+      return handler(request);
+    },
     events,
+    credentialClients,
     jobs,
     setDeleteUserError: (error) => { currentDeleteUserError = error; },
     setBanUserError: (error) => { currentBanUserError = error; },
@@ -229,6 +257,113 @@ test("Auth failure persists an outbox job, and a service-role retry clears it", 
   assert.equal(retryResponse.body.pending, false);
   assert.equal(retryResponse.body.health.pending, 0);
   assert.equal(harness.jobs.length, 0);
+});
+
+test("a separately verified service bearer resumes cleanup when the runtime key differs", async () => {
+  const harness = edgeHarness({
+    data: { deleted: true, scope: "account", batchId: "batch-1" }, error: null,
+  }, { workerAuthorityHealth: { pending: 1, withFailures: 0 } });
+  const result = await harness.invoke({ operation: "retry-auth-cleanup" }, "rotated-service-key");
+  assert.equal(result.status, 200);
+  assert.equal(result.body.processed, 1);
+  assert.equal(harness.jobs.length, 0);
+  assert.equal(harness.credentialClients.length, 1);
+  const { key, options } = harness.credentialClients[0];
+  assert.equal(key, "rotated-service-key");
+  assert.equal(options.global.headers.Authorization, "Bearer rotated-service-key");
+  assert.equal(options.auth.autoRefreshToken, false);
+  assert.equal(options.auth.persistSession, false);
+  assert.equal(options.auth.detectSessionInUrl, false);
+  assert.ok(harness.events.indexOf("worker-authority:service_account_deletion_auth_job_health")
+    < harness.events.indexOf("rpc:service_list_account_deletion_auth_jobs"));
+  assert.equal(harness.events.includes("rpc:service_delete_account_data"), false);
+});
+
+test("anonymous, normal user, AAL2, and forged service claims cannot invoke cleanup", async () => {
+  const unverifiedJwt = (claims) => [
+    Buffer.from('{"alg":"HS256","typ":"JWT"}').toString("base64url"),
+    Buffer.from(JSON.stringify(claims)).toString("base64url"),
+    "unverified-signature",
+  ].join(".");
+  for (const token of [
+    "anon-key", "caller-token",
+    unverifiedJwt({ role: "authenticated", aal: "aal2" }),
+    unverifiedJwt({ role: "service_role" }),
+    unverifiedJwt({ role: "service_role", exp: 1 }),
+    unverifiedJwt({ role: "service_role", ref: "other-project" }),
+  ]) {
+    const harness = edgeHarness({ data: { batchId: "batch-1" }, error: null });
+    const result = await harness.invoke({ operation: "retry-auth-cleanup" }, token);
+    assert.equal(result.status, 401);
+    assert.equal(harness.jobs.length, 1);
+    assert.deepEqual(harness.events, ["worker-authority:service_account_deletion_auth_job_health"]);
+    assert.equal(harness.credentialClients[0].key, token);
+    assert.equal(harness.credentialClients[0].options.global.headers.Authorization, `Bearer ${token}`);
+  }
+});
+
+test("a failed service authority RPC denies cleanup even with a valid-looking response", async () => {
+  const harness = edgeHarness({ data: { batchId: "batch-1" }, error: null }, {
+    workerAuthorityError: { code: "database_unavailable" },
+  });
+  const result = await harness.invoke({ operation: "retry-auth-cleanup" }, "rotated-service-key");
+  assert.equal(result.status, 401);
+  assert.equal(harness.jobs.length, 1);
+  assert.deepEqual(harness.events, ["worker-authority:service_account_deletion_auth_job_health"]);
+});
+
+test("a thrown service authority error cannot fall through into cleanup or user deletion", async () => {
+  const harness = edgeHarness({ data: { batchId: "batch-1" }, error: null }, { workerAuthorityThrows: true });
+  const result = await harness.invoke({ operation: "retry-auth-cleanup" }, "rotated-service-key");
+  assert.equal(result.status, 500);
+  assert.equal(harness.jobs.length, 1);
+  assert.deepEqual(harness.events, ["worker-authority:service_account_deletion_auth_job_health"]);
+});
+
+test("malformed service authority health fails closed before reading or deleting jobs", async () => {
+  for (const workerAuthorityHealth of [
+    null, [], "healthy", {}, { pending: 0 },
+    { pending: "0", withFailures: 0 },
+    { pending: -1, withFailures: 0 },
+    { pending: 0.5, withFailures: 0 },
+    { pending: Number.MAX_SAFE_INTEGER + 1, withFailures: 0 },
+    { pending: Number.NaN, withFailures: 0 },
+    { pending: Number.POSITIVE_INFINITY, withFailures: 0 },
+    { pending: 0, withFailures: "0" },
+    { pending: 0, withFailures: -1 },
+    { pending: 1, withFailures: 0.5 },
+    { pending: 0, withFailures: 1 },
+  ]) {
+    const harness = edgeHarness({ data: { batchId: "batch-1" }, error: null }, { workerAuthorityHealth });
+    const result = await harness.invoke({ operation: "retry-auth-cleanup" }, "rotated-service-key");
+    assert.equal(result.status, 401);
+    assert.equal(harness.jobs.length, 1);
+    assert.deepEqual(harness.events, ["worker-authority:service_account_deletion_auth_job_health"]);
+  }
+});
+
+test("invalid retry bodies cannot reach cleanup for either service credential", async () => {
+  for (const token of ["service-key", "rotated-service-key"]) {
+    for (const batchId of [null, 123, "invalid-uuid"]) {
+      const harness = edgeHarness({ data: { batchId: "batch-1" }, error: null });
+      const result = await harness.invoke({ operation: "retry-auth-cleanup", batchId }, token);
+      assert.equal(result.status, 400);
+      assert.equal(harness.jobs.length, 1);
+      assert.deepEqual(harness.events, []);
+    }
+  }
+});
+
+test("probing a cloned body preserves malformed user JSON handling and the deletion path", async () => {
+  const harness = edgeHarness({ data: { deleted: true, scope: "account", batchId: "batch-1" }, error: null });
+  const invalid = await harness.invoke(new SyntaxError("Invalid JSON"));
+  assert.equal(invalid.status, 500);
+  assert.equal(harness.events.includes("rpc:service_delete_account_data"), false);
+  assert.equal(harness.credentialClients.length, 0);
+  const valid = await harness.invoke();
+  assert.equal(valid.status, 200);
+  assert.equal(valid.body.deleted, true);
+  assert.equal(harness.credentialClients.length, 0);
 });
 
 test("temporary recovery identity lookup failure retains its retry job", async () => {

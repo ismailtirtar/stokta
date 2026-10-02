@@ -124,16 +124,38 @@ Deno.serve(async (req: Request) => {
       return { failed, processed, pending: remaining > 0 };
     };
 
-    // The scheduled server worker retries at most 25 due jobs. Only the actual
-    // service role bearer can invoke this path; an AAL2 user is not a bypass.
-    if (token === serviceRoleKey) {
-      const retryBody = await req.json() as { operation?: unknown; batchId?: unknown };
+    // Read a clone for user requests so their deletion body remains available.
+    const retryBody = (token === serviceRoleKey
+      ? await req.json()
+      : await req.clone().json().catch(() => null)) as { operation?: unknown; batchId?: unknown } | null;
+
+    // The scheduled server worker retries at most 25 due jobs. A configured
+    // service key or a bearer verified by a service-only RPC may invoke it.
+    if (token === serviceRoleKey || retryBody?.operation === "retry-auth-cleanup") {
       if (!retryBody || typeof retryBody !== "object"
         || retryBody.operation !== "retry-auth-cleanup"
         || (retryBody.batchId !== undefined
           && (typeof retryBody.batchId !== "string"
             || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(retryBody.batchId)))) {
         return json(400, { error: "Geçersiz Auth temizlik isteği" });
+      }
+      if (token !== serviceRoleKey) {
+        // Authenticate caller credentials independently of the runtime key,
+        // never using the privileged admin client for this authorization probe.
+        // PostgREST verifies the JWT and this RPC is executable only by service_role.
+        const workerCaller = createClient(supabaseUrl, token, {
+          auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+          global: { headers: { Authorization: `Bearer ${token}` } },
+        });
+        const { data: workerHealth, error: workerError } = await workerCaller.rpc(
+          "service_account_deletion_auth_job_health",
+        );
+        if (workerError || !workerHealth || typeof workerHealth !== "object" || Array.isArray(workerHealth)
+          || !Number.isSafeInteger(workerHealth.pending) || workerHealth.pending < 0
+          || !Number.isSafeInteger(workerHealth.withFailures) || workerHealth.withFailures < 0
+          || workerHealth.withFailures > workerHealth.pending) {
+          return json(401, { error: "Geçersiz Auth temizlik yetkisi" });
+        }
       }
       const retryResult = await drainAuthJobs(
         typeof retryBody.batchId === "string" ? retryBody.batchId : null,
