@@ -109,3 +109,13 @@ Sonraki iki belge değişikliği runtime, test ve SQL içeriğini değiştirmez;
 - https://github.com/advisories/GHSA-86w9-cpqp-85rv
 
 Bu yayın kapıları kapanmadan proje %100 tamamlandı olarak işaretlenmez.
+
+## Uzak EAS derlemesinde Node eşlemesi — 3 Ekim 2026
+
+PR #22 beş kaynak/DB kontrolü PASS sonrasında `98ec875e6faa0695b72abc746ac1f5ad0161698a` ile main'e alındı. Main kaynak CI ve Play doğrulaması geçti; Play gönderimi push olayında atlandı. İlk imzalı aday EAS `190ad668-20ab-4e5d-827f-e16471007a9d`, versionCode 30, `POST_INSTALL_HOOK` aşamasında başarısız oldu; AAB oluşmadı. [Android çalışması](https://github.com/ismailtirtar/stokta/actions/runs/37068956040) ve [yetkili, hassas değerleri ayıklanmış EAS hata kanıtı](https://github.com/ismailtirtar/stokta/actions/runs/37070006220) bu sonucu kaydeder.
+
+Uzak kurulumda ve prebuild sonrasında node-forge yaması 59 dosya/60 RSA vakasıyla geçti; production audit de başarılıydı. EAS SDK 54 ortamındaki Node 20.19.4, dört Google Play test dosyasını çalıştıramadı: yerleşik `.ts` yüklemesi için `ERR_UNKNOWN_FILE_EXTENSION` ve `node:module.registerHooks` eksikliği. Sonuç 121 test birimi, 117 PASS/4 FAIL idi; iş güvenlik ön kontrolünde kapalı kaldı ve Gradle'a ilerlemedi. Node 20.19.4 ile yerel gerçek reconcile testinin aynı `registerHooks` hatası yeniden üretildi.
+
+[Expo altyapı belgesi](https://docs.expo.dev/build-reference/infrastructure/) SDK 54 varsayılanını Node 20.19.4 olarak listeler; [eas.json başvurusu](https://docs.expo.dev/eas/json/#node) profil başına Node sürümü seçimini destekler. Main kaynak CI, Node 22.23.3 ve npm 10.9.9 ile 139/139 test ve tam doğrulamayı geçti. Ortak `eas-build-post-install` kapısını kullanan development, preview ve production profilleri bu doğrulanmış Node sürümüne sabitlendi. Paket sürümleri, lockfile, node-forge yaması, audit kapsamı, tam test kapısı, Android native eklentileri ve mağaza kanalı aynı kalır.
+
+Bu kayıt ilk başarısız derleme ve çalışma zamanı düzeltmesinin kanıtıdır. Düzeltmenin CI sonuçları ve son imzalı AAB/versionCode/imza/provenance kanıtı ilgili düzeltme PR'ında ayrıca kaydedilecektir; versionCode 30 çalışan veya Play'e gönderilmiş bir paket olarak kullanılmamalıdır.
