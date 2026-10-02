@@ -7,7 +7,7 @@ const migration = readFileSync(
   "utf8",
 );
 const verifier = readFileSync(
-  new URL("../supabase/functions/verify-play-subscription/index.ts", import.meta.url),
+  new URL("../supabase/functions/_shared/google_play_sync.ts", import.meta.url),
   "utf8",
 );
 
@@ -19,7 +19,7 @@ test("Google Play ledger accepts every organization subscription status", () => 
   const dbConstraint = migration.match(
     /add constraint organizations_subscription_status_check\s+check \(subscription_status in \(([^)]+)\)\)/,
   );
-  const edgeStatuses = verifier.match(/const subscriptionStatuses = new Set\(\[([\s\S]*?)\]\);/);
+  const edgeStatuses = verifier.match(/const statuses = new Set\(\[([\s\S]*?)\]\);/);
   const edgeType = verifier.match(/subscriptionStatus: ([^;]+);/);
   assert.ok(dbConstraint, "organization status constraint is present");
   assert.ok(edgeStatuses, "Edge status validator is present");

@@ -42,6 +42,9 @@ jobs:
       - name: Verify application types
         run: npm run typecheck
 
+      - name: Verify billing Edge Function types
+        run: npm run typecheck:edge
+
       - name: Verify strict TypeScript hygiene
         run: npm run typecheck:strict
 

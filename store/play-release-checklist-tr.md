@@ -46,7 +46,8 @@
 - [ ] Gizlilik ve hesap silme HTML sayfası herkese açık, sabit bir HTTPS adresinde yayımlanmalı
 - [ ] Temiz uygulama ekran görüntüleri alınmalı; şifre veya kişisel veri görünmemeli
 - [ ] Uygulama erişimi için inceleme hesabı oluşturulmalı; ilk girişte Kullanım Koşulları kabul edilerek ürün/hareket bildirme ve yönetici inceleme akışı doğrulanmalı
-- [ ] Veri Güvenliği formunda kullanıcı tarafından oluşturulan içerik, içerik bildirimi, moderasyon kayıtları ve satın alma geçmişi doğru beyan edilmeli
+- [ ] Açık test incelemesi öncesi canlı Play Console Veri Güvenliği beyanı okunup `Finansal bilgiler > Satın alma geçmişi`, şifreli satın alma belirteci ve silme/saklama akışıyla karşılaştırılmalı; gerekiyorsa form güncellenip onay durumu doğrulanmalı (bkz. `google-play-data-safety-tr.md`)
+- [ ] Veri Güvenliği formunda kullanıcı tarafından oluşturulan içerik, içerik bildirimi ve moderasyon kayıtları doğru beyan edilmeli
 - [ ] İçerik derecelendirmesi, hedef kitle, reklam ve haber uygulaması beyanları doldurulmalı
 - [ ] Kapalı test şartı uygulanıyorsa test tamamlanmalı
 
