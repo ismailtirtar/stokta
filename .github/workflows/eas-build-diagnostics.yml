@@ -85,7 +85,7 @@ jobs:
       - name: Retain redacted diagnostic evidence
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
-          name: stokdas-eas-candidate-e06b5b0
+          name: stokdas-eas-candidate-e06b5b0-${{ github.run_attempt }}
           path: diagnostics/
           if-no-files-found: error
           retention-days: 30
