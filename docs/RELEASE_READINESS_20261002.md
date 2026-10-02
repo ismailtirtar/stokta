@@ -55,7 +55,19 @@ Lockfile içindeki paket sürümleri ve kaynakları değişmedi; yalnız kök `h
 
 Yama kararı **2 Kasım 2026 sonunda UTC** sona erer; kurulum ve denetim yeniden inceleme olmadan geçmez. Resmî düzeltme yayımlanınca aynı imza/Expo testleriyle uyumluluk doğrulanıp bu geçici yama ve koşullu audit kapsamı kaldırılmalıdır. Ayrıntılar, kaynaklar ve kaldırma adımları [node-forge yama belgesindedir](../security/node-forge-patch.md). Bozuk imzalar geçici test özel anahtarlarıyla oluşturulur; testler özel anahtar olmadan yeni bir forgery saldırısı gösterimi veya bütün kriptografinin ispatı değildir.
 
-## Canlı migrasyon geçmişi eşlemesi
+## 3 Ekim 00:42 TSİ cihaz testi öncesi doğrulama
+
+`053a5f771c10e68d733446110b1402c734392d04` adayının beş GitHub kontrolü PASS: [kaynak](https://github.com/ismailtirtar/stokta/actions/runs/37067356825), [Android doğrulaması](https://github.com/ismailtirtar/stokta/actions/runs/37067356674), [Play doğrulaması](https://github.com/ismailtirtar/stokta/actions/runs/37067356693), [abonelik DB provası](https://github.com/ismailtirtar/stokta/actions/runs/37067356728), [silme DB provası](https://github.com/ismailtirtar/stokta/actions/runs/37067356722). PR olayında imzalı build ve mağaza gönderimi atlandı; bu sonuçlar imzalı yeni AAB kanıtı değildir.
+
+Mevcut `supabase/tests/google_play_lifecycle_regression.sql` gerçek SQL hizmet işlevleriyle IBAN onayını, Play hold/expiry/refund sonrasında bağımsız web süresinin korunmasını ve eski sipariş iadesinin güncel siparişi kapatmamasını sınar. Son HEAD'in izole DB provasına bu dosya dahildir. Gerçek Google grace/hold/recovery ve Play Store üzerinden yeniden abonelik lisans testleri ayrıca açık kalır.
+
+2 Ekim 21:41 UTC (3 Ekim 00:41 TSİ) canlı kaynaktan okunan delete-account **v16**, JWT doğrulaması açıkken yayın adayının iki dosyasıyla bayt bazında eşleşir: index.ts SHA-256 `51a7e261fab2b19409b2fd7752027714836929c7fdc927246fc4bdff6ed9b17b`, ortak security.ts `0ce50585d3df42db4b1514a2673eefa5e2aa2e988511888955c4c57efb9f4d9c`. Bu nedenle eski kontrol listesindeki v13 kaydı güncel durum olarak kullanılamaz.
+
+21:42:03 UTC sağlık gözleminde hesap silme Auth kuyruğu pending=0/withFailures=0. `stokdas-account-deletion-auth-cleanup` ve `stokdas-google-play-reconcile` etkin ve beş dakikalıktır. 21:25, 21:30, 21:35 ve 21:40 UTC cron kayıtları başarılı; iki işin bu sekiz HTTP yanıtı 200 ve timeout=false. Auth yanıtları processed=0/pending=false; Play yanıtları failed=0/moreVoidPages=false. Play sağlık çıktısında lifecycleActive=true, overdueCount=0, failedDueCount=0, voidLastCompletedAt=21:40:01 UTC; önceden belgelenen altı kasasız eski ledger kaydı devam eder. Boş kuyruk gözlemi gerçek kullanıcı hesabının uçtan uca silindiği anlamına gelmez.
+
+Bu aşamada sıradaki adım başarılı kaynak adayını main ile birleştirip tek imzalı Android test paketini üretmektir. Mevcut workflow main push'unda güvenlik kontrolünden sonra AAB derler; Play gönderimi yalnız manuel workflow_dispatch ile çalışır. Gerçek cihaz/saklama/bildirim/Console kapıları açık kalır.
+
+## Canlı migrasyon geçmişi eşlemesi (2 Ekim gözlemi)
 
 2 Ekim yalnız okuma karşılaştırmasında 26 canlı geçmiş kaydı ve 21 kaynak dosyası incelendi: 18 ad, 3 özgün sürüm zaman damgası ve 12 tam SQL SHA-256 özeti eşleşti.
 Adı eşleşen 6 SQL içerik farkı açık kaldı: `store_account_deletion`, `self_service_registration`, `google_play_subscription_billing`, `google_play_subscription_authoritative_entitlement`, `google_play_subscription_runtime_fix`, `platform_operator_write_access`.

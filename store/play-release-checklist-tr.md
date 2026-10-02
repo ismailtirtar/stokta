@@ -1,6 +1,6 @@
 # Stokdaş 1.3.4 — Google Play yayın kontrol listesi
 
-2 Ekim 2026: AAB sürümleri ve aşağıdaki geçmiş kontroller yeni birleşik yayın
+3 Ekim 2026 00:42 TSİ kaynak/arka uç kontrolü: AAB sürümleri ve aşağıdaki geçmiş kontroller yeni birleşik yayın
 adayının doğrulandığı anlamına gelmez. Güncel kanıt ve açık kapılar için
 `../docs/RELEASE_READINESS_20261002.md` esas alınır. Son doğrulanmış imzalı AAB
 1.3.4 (29), main `af3e6566` kaynağındandır; bu adayın yeni AAB'si değildir.
@@ -19,7 +19,8 @@ adayının doğrulandığı anlamına gelmez. Güncel kanıt ve açık kapılar 
 - [x] Ürün, stok hareketi notu ve kullanıcı için uygulama içi bildirme akışı eklendi
 - [x] İşletme yöneticileri için bildirim inceleme ve ölçülü moderasyon işlemleri eklendi
 - [x] Kullanım koşulları ve gizlilik politikası UGC/bildirim/moderasyon verilerini açıklar
-- [ ] Çalışan ve yönetici için atomik hesap/veri silme, ödeme bağlantılı talep incelemesi ve kalıcı Auth temizliği canlıya dağıtılıp doğrulanmalı; mevcut canlı v13 eski akıştır
+- [x] Atomik silme ve ödeme bağlantılı talep incelemesi canlı delete-account v16'da; index.ts ve ortak security.ts yayın adayıyla SHA-256 bazında aynı. Auth temizliği beş dakikada bir çalışıyor; son dört HTTP yanıtı 200, pending=0 ve withFailures=0 (3 Ekim 00:42 TSİ)
+- [ ] Çalışan/yönetici gerçek cihaz silme akışları ve ödeme kayıtlı talebin nihai saklama/silme kararı yeni Android paketiyle tamamlanmalı; boş Auth kuyruğu gerçek silme işlemi kanıtı değildir
 - [x] Supabase silme ve Google Play satın alma doğrulama işlevleri JWT doğrulamasıyla canlıya alındı
 - [x] Uygulama içinden güvenli işletme kaydı ve 14 günlük deneme akışı eklendi
 - [x] Google Play Billing izni ve Play Billing Library 9.1.0 AAB manifestinde doğrulandı
@@ -41,8 +42,9 @@ adayının doğrulandığı anlamına gelmez. Güncel kanıt ve açık kapılar 
 - [ ] Dahili test hesabı ayrıca License Tester listesine eklenmeli
 - [x] Google Play yaşam döngüsü arka ucu canlı: verify-play-subscription v10, google-play-rtdn v4, google-play-reconcile v3; 1 Ekim gerçek satın alma/ACK/restore/yenileme/iptal ve etkin refund/revoke provası geçti
 - [ ] Pub/Sub expiration/retry/dead-letter/alarmlar, gerçek Play Store üzerinden yeniden abonelik ve grace/hold/recovery tamamlanmalı; 2 Ekim Google Cloud bu bulut oturumunda erişilemedi
-- [ ] Yeni hesap silme atomik işlem/Auth outbox akışı, gizlilik metni ve birleşik adayın yarış testleri doğrulanmalı; kaynak değişikliği tek başına canlı dağıtım değildir
-- [ ] Stokdaş 1.3.4 (20) AAB'si temiz Play Console taslağına iç AAB dosyası olarak yüklenip dahili testte etkinleştirilmeli (kod 19 genel yükleme hatasıyla paket kitaplığına kaydolmadı; kod 18 etkin)
+- [x] Birleşik 053a5f7 adayında kaynak, Android/Play doğrulaması ve iki izole DB provası PASS; 139 kaynak testi ve payment/delete/refund yarışları geçti. Canlı delete-account v16 ve aktif Auth outbox cron'u ayrıca doğrulandı
+- [x] İzole SQL provasında gerçek web ödeme onayıyla oluşan IBAN süresi Play hold/expiry/refund sonrasında korundu; eski sipariş iadesi güncel sipariş hakkını kapatmadı. Bu Google lisans testlerinin yerine geçmez
+- [ ] Tam kontrolü geçen birleşik adaydan yeni imzalı AAB üretilmeli; commit/paket/sürüm/imza eşleşmesi doğrulanıp dahili teste o paket gönderilmeli. 2 Ekim Console gözleminde dahili testte 1.3.4 (25), Alpha'da 1.3.4 (21) etkin; önceki 18/19/20 kayıtları tarihsel kanıttır
 - [ ] İlk satın alma, pending, restore, yenileme, iptal, grace/hold/recovery, refund/revoke ve hesap silme yarış testleri geçmeli
 - [ ] RTDN testleri tamamlanana kadar yalnız lisans test hesapları kullanılmalı; gerçek ücret açılmamalı
 
