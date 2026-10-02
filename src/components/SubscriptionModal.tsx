@@ -477,7 +477,7 @@ function NativeSubscriptionModal({
                 ? <ActivityIndicator color="#356b54" />
                 : <Text style={styles.restoreButtonText}>Satın alımları geri yükle</Text>}
             </Pressable>
-            {["Aktif", "İnaktif", "Ödeme bekliyor", "Askıda"].includes(subscriptionLabel) ? <Pressable
+            {["Aktif", "İnaktif", "Erişim kapalı", "Askıda"].includes(subscriptionLabel) ? <Pressable
               style={styles.manageButton}
               onPress={() => void openPlaySubscriptionManagement()}
               accessibilityRole="link"

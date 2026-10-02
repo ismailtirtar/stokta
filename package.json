@@ -4,15 +4,19 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
+    "postinstall": "node scripts/node-forge-patch.mjs",
     "start": "expo start",
     "android": "expo start --android",
     "test": "node --test tests/*.test.mjs",
     "audit:production": "node scripts/verify-npm-audit.mjs",
+    "verify:release": "npm run audit:production && npm run typecheck && npm run typecheck:edge && npm run typecheck:strict && npm test && npx expo install --check && npm run export:android",
     "typecheck": "tsc --noEmit",
+    "typecheck:edge": "tsc --project tsconfig.edge.json",
     "typecheck:strict": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
     "export:android": "expo export --platform android",
+    "eas-build-post-install": "npm run verify:release",
     "build:apk": "eas build --platform android --profile preview",
-    "build:play": "eas build --platform android --profile production"
+    "build:play": "npm run verify:release && eas build --platform android --profile production"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -35,6 +39,11 @@
   },
   "overrides": {
     "uuid": "11.1.1",
-    "postcss": "8.5.28"
+    "postcss": "8.5.28",
+    "brace-expansion@^1.0.0": "1.1.21",
+    "brace-expansion@^2.0.0": "2.1.7",
+    "brace-expansion@^5.0.0": "5.0.12",
+    "undici@^6.0.0": "6.28.1",
+    "node-forge": "1.4.0"
   }
 }
