@@ -40,7 +40,7 @@ export function verifyNodeForgePatch({ root = projectRoot, apply = false, now = 
   const pkg = json(join(root, "package.json"));
   const lock = json(join(root, "package-lock.json"));
   assert.equal(pkg.overrides?.["node-forge"], policy.version, "node-forge must have an exact override");
-  assert.equal(pkg.scripts?.postinstall, "node scripts/node-forge-patch.mjs", "node-forge postinstall is mandatory");
+  assert.equal(pkg.scripts?.postinstall, "node scripts/node-forge-patch.mjs && node scripts/braces-patch.mjs", "node-forge postinstall is mandatory");
   assert.equal(lock.lockfileVersion, 3, "unsupported package-lock format");
   const locked = Object.entries(lock.packages);
   const paths = locked.filter(([path]) => /(^|\/)node_modules\/node-forge$/.test(path)).map(([path]) => path).sort();
