@@ -1,0 +1,148 @@
+# Signed Stokdas 1.3.4 (32) was independently verified before this trigger.
+name: Stokdaş verified 32 internal dispatcher
+
+on:
+  push:
+    branches:
+      - release/stokdas-main-internal-32-20261003
+    paths:
+      - .github/workflows/stokdas-main-internal-32-dispatch.yml
+
+permissions: {}
+
+# Separate from the original submission workflow's main concurrency group.
+# This job only creates the run and verifies its identity; it never waits for
+# that run to complete and never executes an EAS submission itself.
+concurrency:
+  group: stokdas-main-dispatch-755d9bbe-32
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.event_name == 'push' && github.repository == 'ismailtirtar/stokta' && github.run_attempt == 1 && github.event.before == '755d9bbedfe8fef74035a5d62ee56554e4acb215'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    env:
+      RELEASE_SHA: 755d9bbedfe8fef74035a5d62ee56554e4acb215
+      BUILD_ID: 5752e097-81d2-4049-bdca-dc5f4d0df5e3
+      VERSION_CODE: '32'
+      EXPECTED_BRANCH: release/stokdas-main-internal-32-20261003
+    steps:
+      - name: Dispatch the existing main internal submission once
+        id: trigger
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, urllib.error, urllib.parse, urllib.request
+
+          repository = 'ismailtirtar/stokta'
+          workflow = 'eas-google-play-submit.yml'
+          workflow_path = '.github/workflows/' + workflow
+          release_sha = os.environ['RELEASE_SHA']
+          build_id = os.environ['BUILD_ID']
+          version_code = os.environ['VERSION_CODE']
+          assert release_sha == '755d9bbedfe8fef74035a5d62ee56554e4acb215'
+          assert re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', build_id), 'Replace the verified build UUID placeholder before use'
+          assert re.fullmatch(r'[1-9][0-9]*', version_code), 'Replace the verified version code placeholder before use'
+          assert os.environ['GITHUB_REPOSITORY'] == repository
+          assert os.environ['GITHUB_REF'] == 'refs/heads/' + os.environ['EXPECTED_BRANCH']
+          assert os.environ['GITHUB_RUN_ATTEMPT'] == '1'
+          event = json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          assert event['before'] == release_sha and event['after'] == os.environ['GITHUB_SHA']
+          assert event['ref'] == os.environ['GITHUB_REF'] and not event.get('deleted') and not event.get('forced')
+          token = os.environ['GH_TOKEN']
+          assert token, 'The ephemeral job token is unavailable'
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, response, code, message, headers, url):
+                  return None
+
+          opener = urllib.request.build_opener(NoRedirect)
+          base = 'https://api.github.com/repos/' + repository
+          headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
+                     'X-GitHub-Api-Version': '2026-03-10', 'User-Agent': 'Stokdas-single-use-internal-dispatch'}
+
+          def api(path, method='GET', payload=None):
+              assert path.startswith('/') and not path.startswith('//')
+              body = None if payload is None else json.dumps(payload).encode('utf8')
+              request = urllib.request.Request(base + path, data=body, headers=headers, method=method)
+              if body is not None:
+                  request.add_header('Content-Type', 'application/json')
+              try:
+                  with opener.open(request, timeout=30) as response:
+                      assert response.status == 200, 'Unexpected GitHub API response status'
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  raise SystemExit(f'GitHub API {method} {path.split("?")[0]} returned {error.code}; no automatic dispatch retry') from None
+
+          def check_main():
+              branch = api('/branches/main')
+              assert branch['name'] == 'main' and branch['commit']['sha'] == release_sha, 'main changed; stop dispatch'
+
+          check_main()
+          definition = api('/actions/workflows/' + workflow)
+          assert definition['path'] == workflow_path and definition['state'] == 'active'
+          workflow_id = definition['id']
+          assert type(workflow_id) is int and workflow_id > 0
+
+          # Any earlier manual run for this exact main commit is inspected or
+          # retried as that existing run. This dispatcher never creates a second
+          # run after an ambiguous timeout, failure, success or active submission.
+          for page in range(1, 11):
+              query = urllib.parse.urlencode({'event': 'workflow_dispatch', 'branch': 'main',
+                                             'head_sha': release_sha, 'per_page': 100, 'page': page})
+              history = api('/actions/workflows/' + workflow + '/runs?' + query)
+              items = history['workflow_runs']
+              assert isinstance(items, list) and len(items) <= 100, 'Unexpected workflow history schema'
+              for item in items:
+                  assert isinstance(item, dict) and item['workflow_id'] == workflow_id
+                  assert item['repository']['full_name'] == repository
+                  if item['event'] == 'workflow_dispatch' and item['head_branch'] == 'main' and item['head_sha'] == release_sha:
+                      raise SystemExit(f'Exact main already has manual submission run {item["id"]}; inspect that run instead of dispatching again')
+              if len(items) < 100:
+                  break
+          else:
+              raise SystemExit('Workflow history exceeds the bounded duplicate scan; stop dispatch')
+
+          check_main()
+          response = api('/actions/workflows/' + workflow + '/dispatches', method='POST',
+                         payload={'ref': 'main', 'inputs': {'build_id': build_id}})
+          run_id = response['workflow_run_id']
+          assert type(run_id) is int and run_id > 0, 'The dispatch response lacks an exact run ID'
+          receipt = {'repository': repository, 'workflowId': workflow_id, 'workflowPath': workflow_path,
+                     'workflowRunId': run_id, 'sourceCommit': release_sha, 'buildId': build_id,
+                     'versionCode': version_code, 'track': 'internal', 'runIdentityVerified': False}
+          target = pathlib.Path('dispatch-artifacts')
+          target.mkdir(exist_ok=True)
+          receipt_path = target / 'dispatch-receipt.json'
+          receipt_path.write_text(json.dumps(receipt, indent=2) + '\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'workflow_run_id={run_id}\n')
+
+          # Compute this endpoint from the verified integer ID. Never follow a
+          # response-provided URL with an Authorization header.
+          run = api('/actions/runs/' + str(run_id))
+          assert run['id'] == run_id and run['workflow_id'] == workflow_id
+          assert run['repository']['full_name'] == repository
+          assert run['event'] == 'workflow_dispatch' and run['head_branch'] == 'main'
+          assert run['head_sha'] == release_sha, 'Dispatched run source changed; inspect the exact run'
+          assert run['path'].split('@', 1)[0] == workflow_path
+          receipt['runIdentityVerified'] = True
+          receipt_path.write_text(json.dumps(receipt, indent=2) + '\n')
+          print(json.dumps(receipt))
+          print('Original main workflow triggered. Delivery is confirmed separately by its submission result.')
+          PY
+
+      - name: Keep the trigger receipt with non-sensitive IDs only
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: stokdas-32-main-internal-dispatch-receipt
+          path: dispatch-artifacts/dispatch-receipt.json
+          if-no-files-found: warn
+          retention-days: 30
