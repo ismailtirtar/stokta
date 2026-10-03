@@ -1,0 +1,221 @@
+name: Stokdaş verified 31 internal delivery
+
+on:
+  push:
+    branches: [release/stokdas-internal-31-20261003]
+    paths: [.github/workflows/stokdas-internal-31.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stokdas-google-play-submit-refs/heads/main
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    if: github.run_attempt == 1 && github.event.before == 'e06b5b08b6b811fd427290831677565071602e0b'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RELEASE_SHA: e06b5b08b6b811fd427290831677565071602e0b
+      BUILD_ID: 77efcaf8-9267-4d7e-bd84-478f455733c1
+      BUNDLE_SHA256: 67e9629a1c891a32504fb56aa94b423a80cb882ed2fed94d15335e0981fc2c6c
+    steps:
+      - name: Checkout the exact signed release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: e06b5b08b6b811fd427290831677565071602e0b
+          persist-credentials: false
+
+      - name: Require unchanged main and internal release configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          python3 - <<'PY'
+          import json, os, urllib.request
+          request = urllib.request.Request('https://api.github.com/repos/ismailtirtar/stokta/branches/main', headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              branch = json.load(response)
+          assert branch['commit']['sha'] == os.environ['RELEASE_SHA'], 'main changed; stop submission'
+          app = json.load(open('app.json'))['expo']
+          package = json.load(open('package.json'))
+          eas = json.load(open('eas.json'))
+          assert app['version'] == package['version'] == '1.3.4'
+          assert app['android']['package'] == 'com.ismailtirtar.stokta'
+          assert app['extra']['eas']['projectId'] == '6d9c0250-c796-4458-9fdb-99e50b690c3b'
+          assert eas['cli']['appVersionSource'] == 'remote'
+          assert eas['build']['production']['autoIncrement'] is True
+          assert eas['build']['production']['android']['buildType'] == 'app-bundle'
+          submit = eas['submit']['production']['android']
+          assert submit['applicationId'] == app['android']['package']
+          assert submit['track'] == 'internal' and submit['releaseStatus'] == 'completed'
+          assert submit['changesNotSentForReview'] is False
+          print('Exact main, package, version, project and internal release configuration verified.')
+          PY
+
+      - name: Set up the verified Node runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22.23.3
+          cache: npm
+
+      - name: Install the signed release dependencies
+        run: npm ci
+
+      - name: Run mandatory release security and application checks
+        run: npm run verify:release
+
+      - name: Set up the pinned EAS CLI
+        uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385
+        with:
+          eas-version: 23.0.0
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Verify finished build and the exact signed AAB bytes
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          eas build:view "$BUILD_ID" --json > eas-build.json
+          python3 - <<'PY'
+          import hashlib, json, os, urllib.request, urllib.parse
+          build = json.load(open('eas-build.json'))
+          expected = {'id': os.environ['BUILD_ID'], 'status': 'FINISHED', 'platform': 'ANDROID', 'distribution': 'STORE', 'buildProfile': 'production', 'appVersion': '1.3.4', 'appBuildVersion': '31', 'gitCommitHash': os.environ['RELEASE_SHA'], 'appIdentifier': 'com.ismailtirtar.stokta'}
+          for key, value in expected.items():
+              assert build.get(key) == value, 'Build identity mismatch: ' + key
+          assert build['app']['id'] == '6d9c0250-c796-4458-9fdb-99e50b690c3b'
+          url = build['artifacts']['applicationArchiveUrl']
+          assert urllib.parse.urlparse(url).scheme == 'https' and urllib.parse.urlparse(url).hostname == 'expo.dev'
+          digest = hashlib.sha256()
+          size = 0
+          request = urllib.request.Request(url, headers={'User-Agent': 'curl/8.0'})
+          with urllib.request.urlopen(request, timeout=120) as response:
+              assert urllib.parse.urlparse(response.url).scheme == 'https'
+              while chunk := response.read(1024 * 1024):
+                  size += len(chunk)
+                  assert size <= 41256691, 'Unexpected AAB size'
+                  digest.update(chunk)
+          assert size == 41256691 and digest.hexdigest() == os.environ['BUNDLE_SHA256'], 'Signed AAB bytes changed'
+          proof = {'buildId': build['id'], 'gitCommitHash': build['gitCommitHash'], 'appVersion': build['appVersion'], 'appBuildVersion': build['appBuildVersion'], 'sha256': digest.hexdigest(), 'bytes': size, 'track': 'internal'}
+          json.dump(proof, open('submission-provenance.json', 'w'), indent=2)
+          print(json.dumps(proof))
+          PY
+
+      - name: Prevent a duplicate or concurrent submission of this build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          for offset in $(seq 0 50 950); do
+            eas submit:list --platform android --limit 50 --offset "$offset" --json > prior-submissions.json
+            PAGE_SIZE="$(python3 - <<'PY'
+          import json, os
+          items = json.load(open('prior-submissions.json'))
+          assert isinstance(items, list) and len(items) <= 50, 'Unexpected submission schema'
+          for item in items:
+              assert isinstance(item, dict) and item.get('id') and item.get('status'), 'Invalid submission record'
+              build = item.get('submittedBuild')
+              if build and build.get('id') == os.environ['BUILD_ID']:
+                  assert item['status'] in ('ERRORED', 'CANCELED'), 'This build already has an active or successful submission; inspect it instead of submitting again'
+          print(len(items))
+          PY
+          )"
+            if [ "$PAGE_SIZE" -lt 50 ]; then
+              exit 0
+            fi
+          done
+          echo '::error::Submission history exceeded the bounded duplicate scan.'
+          exit 1
+
+      - name: Recheck main immediately before the authorized internal delivery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          request = urllib.request.Request('https://api.github.com/repos/ismailtirtar/stokta/branches/main', headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              branch = json.load(response)
+          assert branch['commit']['sha'] == os.environ['RELEASE_SHA'], 'main changed; stop submission'
+          PY
+
+      - name: Submit only the verified build to Google Play internal testing
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          eas submit --platform android --profile production --id "$BUILD_ID" --non-interactive --wait --verbose 2>&1 | tee eas-submit.log
+
+      - name: Verify the exact command-emitted submission record
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          SUBMISSION_ID="$(python3 - <<'PY'
+          import re
+          log = open('eas-submit.log').read()
+          ids = set(re.findall(r'https://expo\.dev/accounts/[^/\s]+/projects/[^/\s]+/submissions/([0-9a-f-]{36})', log))
+          assert len(ids) == 1, 'Could not unambiguously identify the exact submission'
+          print(ids.pop())
+          PY
+          )"
+          eas submit:view "$SUBMISSION_ID" --json > eas-submit.json
+          python3 - "$SUBMISSION_ID" <<'PY'
+          import json, os, sys
+          item = json.load(open('eas-submit.json'))
+          assert item['id'] == sys.argv[1] and item['status'] == 'FINISHED' and item['platform'] == 'ANDROID'
+          assert item['app']['id'] == '6d9c0250-c796-4458-9fdb-99e50b690c3b'
+          assert item['submittedBuild']['id'] == os.environ['BUILD_ID']
+          assert item['submittedBuild']['gitCommitHash'] == os.environ['RELEASE_SHA']
+          assert item['submittedBuild']['appBuildVersion'] == '31'
+          assert item['androidConfig']['track'].lower() == 'internal' and item['androidConfig']['releaseStatus'].lower() == 'completed'
+          proof = json.load(open('submission-provenance.json'))
+          proof.update({'submissionId': item['id'], 'status': item['status'], 'completedAt': item.get('completedAt')})
+          json.dump(proof, open('submission-provenance.json', 'w'), indent=2)
+          print(json.dumps(proof))
+          PY
+
+      - name: Prepare submission evidence without credentials or download URLs
+        if: always()
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          target = pathlib.Path('submission-artifacts')
+          target.mkdir(exist_ok=True)
+          token = os.environ.get('EXPO_TOKEN', '')
+          def redact(text):
+              if token:
+                  text = text.replace(token, '[credential removed]')
+              return re.sub(r'https?://[^\s\"<>]+', '[URL removed]', text)
+          def build_summary(item):
+              return {key: item.get(key) for key in ('id', 'status', 'platform', 'distribution', 'buildProfile', 'appVersion', 'appBuildVersion', 'gitCommitHash', 'appIdentifier')}
+          path = pathlib.Path('eas-build.json')
+          if path.exists() and path.stat().st_size:
+              json.dump(build_summary(json.loads(path.read_text())), open(target / path.name, 'w'), indent=2)
+          path = pathlib.Path('eas-submit.json')
+          if path.exists() and path.stat().st_size:
+              item = json.loads(path.read_text())
+              summary = {key: item.get(key) for key in ('id', 'status', 'platform', 'createdAt', 'completedAt', 'androidConfig', 'error')}
+              summary['projectId'] = item.get('app', {}).get('id')
+              summary['submittedBuild'] = build_summary(item.get('submittedBuild') or {})
+              (target / path.name).write_text(redact(json.dumps(summary, indent=2)))
+          for name in ('eas-submit.log', 'submission-provenance.json'):
+              path = pathlib.Path(name)
+              if path.exists():
+                  (target / name).write_text(redact(path.read_text()))
+          PY
+
+      - name: Keep the bounded submission evidence
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: stokdas-1.3.4-31-google-play-submission
+          path: submission-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
