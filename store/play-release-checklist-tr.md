@@ -1,9 +1,9 @@
 # Stokdaş 1.3.4 — Google Play yayın kontrol listesi
 
-3 Ekim 2026 00:42 TSİ kaynak/arka uç kontrolü: AAB sürümleri ve aşağıdaki geçmiş kontroller yeni birleşik yayın
-adayının doğrulandığı anlamına gelmez. Güncel kanıt ve açık kapılar için
-`../docs/RELEASE_READINESS_20261002.md` esas alınır. Son doğrulanmış imzalı AAB
-1.3.4 (29), main `af3e6566` kaynağındandır; bu adayın yeni AAB'si değildir.
+3 Ekim 2026 gönderim ön kontrolü: imzalı 1.3.4 (31), main `e06b5b08` kaynağından
+üretildi ve paket/imza/bütünlük kontrolleri geçti. Yeni braces danışmanı nedeniyle
+yenilenen güvenlik kontrolü gönderimi durdurdu; bu paket Play'e yüklenmedi.
+Güncel kanıt ve açık kapılar için `../docs/RELEASE_READINESS_20261002.md` esas alınır.
 
 ## Hazır olanlar
 
@@ -44,7 +44,7 @@ adayının doğrulandığı anlamına gelmez. Güncel kanıt ve açık kapılar 
 - [ ] Pub/Sub expiration/retry/dead-letter/alarmlar, gerçek Play Store üzerinden yeniden abonelik ve grace/hold/recovery tamamlanmalı; 2 Ekim Google Cloud bu bulut oturumunda erişilemedi
 - [x] Birleşik 053a5f7 adayında kaynak, Android/Play doğrulaması ve iki izole DB provası PASS; 139 kaynak testi ve payment/delete/refund yarışları geçti. Canlı delete-account v16 ve aktif Auth outbox cron'u ayrıca doğrulandı
 - [x] İzole SQL provasında gerçek web ödeme onayıyla oluşan IBAN süresi Play hold/expiry/refund sonrasında korundu; eski sipariş iadesi güncel sipariş hakkını kapatmadı. Bu Google lisans testlerinin yerine geçmez
-- [ ] Tam kontrolü geçen birleşik adaydan yeni imzalı AAB üretilmeli; commit/paket/sürüm/imza eşleşmesi doğrulanıp dahili teste o paket gönderilmeli. 2 Ekim Console gözleminde dahili testte 1.3.4 (25), Alpha'da 1.3.4 (21) etkin; önceki 18/19/20 kayıtları tarihsel kanıttır
+- [ ] braces güvenlik düzeltmesi sonrası tam kontrolü geçen kaynaktan yeni imzalı AAB üretilmeli; commit/paket/sürüm/imza eşleşmesi doğrulanıp dahili teste o paket gönderilmeli. 31 numaralı önceki aday yeni bulgu nedeniyle gönderilmedi. 2 Ekim Console gözleminde dahili testte 1.3.4 (25), Alpha'da 1.3.4 (21) etkin; önceki 18/19/20 kayıtları tarihsel kanıttır
 - [ ] İlk satın alma, pending, restore, yenileme, iptal, grace/hold/recovery, refund/revoke ve hesap silme yarış testleri geçmeli
 - [ ] RTDN testleri tamamlanana kadar yalnız lisans test hesapları kullanılmalı; gerçek ücret açılmamalı
 

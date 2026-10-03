@@ -1,0 +1,340 @@
+{
+  "version": "3.0.3",
+  "advisory": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+  "expiresOn": "2026-11-02",
+  "upstreamPullRequest": "https://github.com/micromatch/braces/pull/72",
+  "upstreamCommit": "d0d575e55e74a4e0218e5248fafb79efc3e54ebb",
+  "localHardening": "Bound both expand AST parent-chain loops to 100 steps; this addition is not present in the unmerged upstream proposal.",
+  "maxDepth": 100,
+  "resolved": "https://registry.npmjs.org/braces/-/braces-3.0.3.tgz",
+  "integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==",
+  "installPaths": [
+    "node_modules/braces"
+  ],
+  "consumers": {
+    "node_modules/micromatch": "4.0.8"
+  },
+  "probeDependencies": {
+    "node_modules/fill-range": {
+      "version": "7.1.1",
+      "resolved": "https://registry.npmjs.org/fill-range/-/fill-range-7.1.1.tgz",
+      "integrity": "sha512-YsGpe3WHLK8ZYi4tWDg2Jy3ebRz2rXowDxnld4bkQB00cc/1Zw9AWnC0i9ztDJitivtQvaI9KaLyKrc+hBW0yg=="
+    },
+    "node_modules/to-regex-range": {
+      "version": "5.0.1",
+      "resolved": "https://registry.npmjs.org/to-regex-range/-/to-regex-range-5.0.1.tgz",
+      "integrity": "sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ=="
+    },
+    "node_modules/is-number": {
+      "version": "7.0.0",
+      "resolved": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz",
+      "integrity": "sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng=="
+    },
+    "node_modules/micromatch": {
+      "version": "4.0.8",
+      "resolved": "https://registry.npmjs.org/micromatch/-/micromatch-4.0.8.tgz",
+      "integrity": "sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA=="
+    },
+    "node_modules/picomatch": {
+      "version": "2.3.2",
+      "resolved": "https://registry.npmjs.org/picomatch/-/picomatch-2.3.2.tgz",
+      "integrity": "sha512-V7+vQEJ06Z+c5tSye8S+nHUfI51xoXIXjHQ99cQtKUkQqqO1kO/KCJUfZXuB47h/YBlDhah2H3hdUGXn8ie0oA=="
+    }
+  },
+  "replacements": {
+    "lib/compile.js": {
+      "before": "'use strict';\n\nconst fill = require('fill-range');\nconst utils = require('./utils');\n\nconst compile = (ast, options = {}) => {\n  const walk = (node, parent = {}) => {\n    const invalidBlock = utils.isInvalidBrace(parent);\n    const invalidNode = node.invalid === true && options.escapeInvalid === true;\n    const invalid = invalidBlock === true || invalidNode === true;\n    const prefix = options.escapeInvalid === true ? '\\\\' : '';\n    let output = '';\n\n    if (node.isOpen === true) {\n      return prefix + node.value;\n    }\n\n    if (node.isClose === true) {\n      console.log('node.isClose', prefix, node.value);\n      return prefix + node.value;\n    }\n\n    if (node.type === 'open') {\n      return invalid ? prefix + node.value : '(';\n    }\n\n    if (node.type === 'close') {\n      return invalid ? prefix + node.value : ')';\n    }\n\n    if (node.type === 'comma') {\n      return node.prev.type === 'comma' ? '' : invalid ? node.value : '|';\n    }\n\n    if (node.value) {\n      return node.value;\n    }\n\n    if (node.nodes && node.ranges > 0) {\n      const args = utils.reduce(node.nodes);\n      const range = fill(...args, { ...options, wrap: false, toRegex: true, strictZeros: true });\n\n      if (range.length !== 0) {\n        return args.length > 1 && range.length > 1 ? `(${range})` : range;\n      }\n    }\n\n    if (node.nodes) {\n      for (const child of node.nodes) {\n        output += walk(child, node);\n      }\n    }\n\n    return output;\n  };\n\n  return walk(ast);\n};\n\nmodule.exports = compile;\n",
+      "after": "'use strict';\n\nconst fill = require('fill-range');\nconst utils = require('./utils');\nconst { MAX_DEPTH } = require('./constants');\n\nconst compile = (ast, options = {}) => {\n  const maxDepth = Number.isFinite(options.maxDepth) ? Math.min(MAX_DEPTH, options.maxDepth) : MAX_DEPTH;\n\n  const walk = (node, parent = {}, depth = 0) => {\n    if (node.nodes && depth > maxDepth) {\n      throw new RangeError(`AST depth (${depth}), exceeds max depth (${maxDepth})`);\n    }\n    const invalidBlock = utils.isInvalidBrace(parent);\n    const invalidNode = node.invalid === true && options.escapeInvalid === true;\n    const invalid = invalidBlock === true || invalidNode === true;\n    const prefix = options.escapeInvalid === true ? '\\\\' : '';\n    let output = '';\n\n    if (node.isOpen === true) {\n      return prefix + node.value;\n    }\n\n    if (node.isClose === true) {\n      console.log('node.isClose', prefix, node.value);\n      return prefix + node.value;\n    }\n\n    if (node.type === 'open') {\n      return invalid ? prefix + node.value : '(';\n    }\n\n    if (node.type === 'close') {\n      return invalid ? prefix + node.value : ')';\n    }\n\n    if (node.type === 'comma') {\n      return node.prev.type === 'comma' ? '' : invalid ? node.value : '|';\n    }\n\n    if (node.value) {\n      return node.value;\n    }\n\n    if (node.nodes && node.ranges > 0) {\n      const args = utils.reduce(node.nodes);\n      const range = fill(...args, { ...options, wrap: false, toRegex: true, strictZeros: true });\n\n      if (range.length !== 0) {\n        return args.length > 1 && range.length > 1 ? `(${range})` : range;\n      }\n    }\n\n    if (node.nodes) {\n      for (const child of node.nodes) {\n        output += walk(child, node, child.nodes ? depth + 1 : depth);\n      }\n    }\n\n    return output;\n  };\n\n  return walk(ast, {}, ast.type === 'root' ? 0 : 1);\n};\n\nmodule.exports = compile;\n"
+    },
+    "lib/constants.js": {
+      "before": "'use strict';\n\nmodule.exports = {\n  MAX_LENGTH: 10000,\n\n  // Digits\n  CHAR_0: '0', /* 0 */\n  CHAR_9: '9', /* 9 */\n\n  // Alphabet chars.\n  CHAR_UPPERCASE_A: 'A', /* A */\n  CHAR_LOWERCASE_A: 'a', /* a */\n  CHAR_UPPERCASE_Z: 'Z', /* Z */\n  CHAR_LOWERCASE_Z: 'z', /* z */\n\n  CHAR_LEFT_PARENTHESES: '(', /* ( */\n  CHAR_RIGHT_PARENTHESES: ')', /* ) */\n\n  CHAR_ASTERISK: '*', /* * */\n\n  // Non-alphabetic chars.\n  CHAR_AMPERSAND: '&', /* & */\n  CHAR_AT: '@', /* @ */\n  CHAR_BACKSLASH: '\\\\', /* \\ */\n  CHAR_BACKTICK: '`', /* ` */\n  CHAR_CARRIAGE_RETURN: '\\r', /* \\r */\n  CHAR_CIRCUMFLEX_ACCENT: '^', /* ^ */\n  CHAR_COLON: ':', /* : */\n  CHAR_COMMA: ',', /* , */\n  CHAR_DOLLAR: '$', /* . */\n  CHAR_DOT: '.', /* . */\n  CHAR_DOUBLE_QUOTE: '\"', /* \" */\n  CHAR_EQUAL: '=', /* = */\n  CHAR_EXCLAMATION_MARK: '!', /* ! */\n  CHAR_FORM_FEED: '\\f', /* \\f */\n  CHAR_FORWARD_SLASH: '/', /* / */\n  CHAR_HASH: '#', /* # */\n  CHAR_HYPHEN_MINUS: '-', /* - */\n  CHAR_LEFT_ANGLE_BRACKET: '<', /* < */\n  CHAR_LEFT_CURLY_BRACE: '{', /* { */\n  CHAR_LEFT_SQUARE_BRACKET: '[', /* [ */\n  CHAR_LINE_FEED: '\\n', /* \\n */\n  CHAR_NO_BREAK_SPACE: '\\u00A0', /* \\u00A0 */\n  CHAR_PERCENT: '%', /* % */\n  CHAR_PLUS: '+', /* + */\n  CHAR_QUESTION_MARK: '?', /* ? */\n  CHAR_RIGHT_ANGLE_BRACKET: '>', /* > */\n  CHAR_RIGHT_CURLY_BRACE: '}', /* } */\n  CHAR_RIGHT_SQUARE_BRACKET: ']', /* ] */\n  CHAR_SEMICOLON: ';', /* ; */\n  CHAR_SINGLE_QUOTE: '\\'', /* ' */\n  CHAR_SPACE: ' ', /*   */\n  CHAR_TAB: '\\t', /* \\t */\n  CHAR_UNDERSCORE: '_', /* _ */\n  CHAR_VERTICAL_LINE: '|', /* | */\n  CHAR_ZERO_WIDTH_NOBREAK_SPACE: '\\uFEFF' /* \\uFEFF */\n};\n",
+      "after": "'use strict';\n\nmodule.exports = {\n  MAX_DEPTH: 100,\n  MAX_LENGTH: 10000,\n\n  // Digits\n  CHAR_0: '0', /* 0 */\n  CHAR_9: '9', /* 9 */\n\n  // Alphabet chars.\n  CHAR_UPPERCASE_A: 'A', /* A */\n  CHAR_LOWERCASE_A: 'a', /* a */\n  CHAR_UPPERCASE_Z: 'Z', /* Z */\n  CHAR_LOWERCASE_Z: 'z', /* z */\n\n  CHAR_LEFT_PARENTHESES: '(', /* ( */\n  CHAR_RIGHT_PARENTHESES: ')', /* ) */\n\n  CHAR_ASTERISK: '*', /* * */\n\n  // Non-alphabetic chars.\n  CHAR_AMPERSAND: '&', /* & */\n  CHAR_AT: '@', /* @ */\n  CHAR_BACKSLASH: '\\\\', /* \\ */\n  CHAR_BACKTICK: '`', /* ` */\n  CHAR_CARRIAGE_RETURN: '\\r', /* \\r */\n  CHAR_CIRCUMFLEX_ACCENT: '^', /* ^ */\n  CHAR_COLON: ':', /* : */\n  CHAR_COMMA: ',', /* , */\n  CHAR_DOLLAR: '$', /* . */\n  CHAR_DOT: '.', /* . */\n  CHAR_DOUBLE_QUOTE: '\"', /* \" */\n  CHAR_EQUAL: '=', /* = */\n  CHAR_EXCLAMATION_MARK: '!', /* ! */\n  CHAR_FORM_FEED: '\\f', /* \\f */\n  CHAR_FORWARD_SLASH: '/', /* / */\n  CHAR_HASH: '#', /* # */\n  CHAR_HYPHEN_MINUS: '-', /* - */\n  CHAR_LEFT_ANGLE_BRACKET: '<', /* < */\n  CHAR_LEFT_CURLY_BRACE: '{', /* { */\n  CHAR_LEFT_SQUARE_BRACKET: '[', /* [ */\n  CHAR_LINE_FEED: '\\n', /* \\n */\n  CHAR_NO_BREAK_SPACE: '\\u00A0', /* \\u00A0 */\n  CHAR_PERCENT: '%', /* % */\n  CHAR_PLUS: '+', /* + */\n  CHAR_QUESTION_MARK: '?', /* ? */\n  CHAR_RIGHT_ANGLE_BRACKET: '>', /* > */\n  CHAR_RIGHT_CURLY_BRACE: '}', /* } */\n  CHAR_RIGHT_SQUARE_BRACKET: ']', /* ] */\n  CHAR_SEMICOLON: ';', /* ; */\n  CHAR_SINGLE_QUOTE: '\\'', /* ' */\n  CHAR_SPACE: ' ', /*   */\n  CHAR_TAB: '\\t', /* \\t */\n  CHAR_UNDERSCORE: '_', /* _ */\n  CHAR_VERTICAL_LINE: '|', /* | */\n  CHAR_ZERO_WIDTH_NOBREAK_SPACE: '\\uFEFF' /* \\uFEFF */\n};\n"
+    },
+    "lib/expand.js": {
+      "before": "'use strict';\n\nconst fill = require('fill-range');\nconst stringify = require('./stringify');\nconst utils = require('./utils');\n\nconst append = (queue = '', stash = '', enclose = false) => {\n  const result = [];\n\n  queue = [].concat(queue);\n  stash = [].concat(stash);\n\n  if (!stash.length) return queue;\n  if (!queue.length) {\n    return enclose ? utils.flatten(stash).map(ele => `{${ele}}`) : stash;\n  }\n\n  for (const item of queue) {\n    if (Array.isArray(item)) {\n      for (const value of item) {\n        result.push(append(value, stash, enclose));\n      }\n    } else {\n      for (let ele of stash) {\n        if (enclose === true && typeof ele === 'string') ele = `{${ele}}`;\n        result.push(Array.isArray(ele) ? append(item, ele, enclose) : item + ele);\n      }\n    }\n  }\n  return utils.flatten(result);\n};\n\nconst expand = (ast, options = {}) => {\n  const rangeLimit = options.rangeLimit === undefined ? 1000 : options.rangeLimit;\n\n  const walk = (node, parent = {}) => {\n    node.queue = [];\n\n    let p = parent;\n    let q = parent.queue;\n\n    while (p.type !== 'brace' && p.type !== 'root' && p.parent) {\n      p = p.parent;\n      q = p.queue;\n    }\n\n    if (node.invalid || node.dollar) {\n      q.push(append(q.pop(), stringify(node, options)));\n      return;\n    }\n\n    if (node.type === 'brace' && node.invalid !== true && node.nodes.length === 2) {\n      q.push(append(q.pop(), ['{}']));\n      return;\n    }\n\n    if (node.nodes && node.ranges > 0) {\n      const args = utils.reduce(node.nodes);\n\n      if (utils.exceedsLimit(...args, options.step, rangeLimit)) {\n        throw new RangeError('expanded array length exceeds range limit. Use options.rangeLimit to increase or disable the limit.');\n      }\n\n      let range = fill(...args, options);\n      if (range.length === 0) {\n        range = stringify(node, options);\n      }\n\n      q.push(append(q.pop(), range));\n      node.nodes = [];\n      return;\n    }\n\n    const enclose = utils.encloseBrace(node);\n    let queue = node.queue;\n    let block = node;\n\n    while (block.type !== 'brace' && block.type !== 'root' && block.parent) {\n      block = block.parent;\n      queue = block.queue;\n    }\n\n    for (let i = 0; i < node.nodes.length; i++) {\n      const child = node.nodes[i];\n\n      if (child.type === 'comma' && node.type === 'brace') {\n        if (i === 1) queue.push('');\n        queue.push('');\n        continue;\n      }\n\n      if (child.type === 'close') {\n        q.push(append(q.pop(), queue, enclose));\n        continue;\n      }\n\n      if (child.value && child.type !== 'open') {\n        queue.push(append(queue.pop(), child.value));\n        continue;\n      }\n\n      if (child.nodes) {\n        walk(child, node);\n      }\n    }\n\n    return queue;\n  };\n\n  return utils.flatten(walk(ast));\n};\n\nmodule.exports = expand;\n",
+      "after": "'use strict';\n\nconst fill = require('fill-range');\nconst stringify = require('./stringify');\nconst utils = require('./utils');\nconst { MAX_DEPTH } = require('./constants');\n\nconst append = (queue = '', stash = '', enclose = false) => {\n  const result = [];\n\n  queue = [].concat(queue);\n  stash = [].concat(stash);\n\n  if (!stash.length) return queue;\n  if (!queue.length) {\n    return enclose ? utils.flatten(stash).map(ele => `{${ele}}`) : stash;\n  }\n\n  for (const item of queue) {\n    if (Array.isArray(item)) {\n      for (const value of item) {\n        result.push(append(value, stash, enclose));\n      }\n    } else {\n      for (let ele of stash) {\n        if (enclose === true && typeof ele === 'string') ele = `{${ele}}`;\n        result.push(Array.isArray(ele) ? append(item, ele, enclose) : item + ele);\n      }\n    }\n  }\n  return utils.flatten(result);\n};\n\nconst expand = (ast, options = {}) => {\n  const rangeLimit = options.rangeLimit === undefined ? 1000 : options.rangeLimit;\n  const maxDepth = Number.isFinite(options.maxDepth) ? Math.min(MAX_DEPTH, options.maxDepth) : MAX_DEPTH;\n\n  const walk = (node, parent = {}, depth = 0) => {\n    if (node.nodes && depth > maxDepth) {\n      throw new RangeError(`AST depth (${depth}), exceeds max depth (${maxDepth})`);\n    }\n    node.queue = [];\n\n    let p = parent;\n    let q = parent.queue;\n\n    let parentDepth = 0;\n    while (p.type !== 'brace' && p.type !== 'root' && p.parent) {\n      if (++parentDepth > MAX_DEPTH) {\n        throw new RangeError(`AST parent depth exceeds max depth (${MAX_DEPTH})`);\n      }\n      p = p.parent;\n      q = p.queue;\n    }\n\n    if (node.invalid || node.dollar) {\n      q.push(append(q.pop(), stringify(node, options)));\n      return;\n    }\n\n    if (node.type === 'brace' && node.invalid !== true && node.nodes.length === 2) {\n      q.push(append(q.pop(), ['{}']));\n      return;\n    }\n\n    if (node.nodes && node.ranges > 0) {\n      const args = utils.reduce(node.nodes);\n\n      if (utils.exceedsLimit(...args, options.step, rangeLimit)) {\n        throw new RangeError('expanded array length exceeds range limit. Use options.rangeLimit to increase or disable the limit.');\n      }\n\n      let range = fill(...args, options);\n      if (range.length === 0) {\n        range = stringify(node, options);\n      }\n\n      q.push(append(q.pop(), range));\n      node.nodes = [];\n      return;\n    }\n\n    const enclose = utils.encloseBrace(node);\n    let queue = node.queue;\n    let block = node;\n\n    parentDepth = 0;\n    while (block.type !== 'brace' && block.type !== 'root' && block.parent) {\n      if (++parentDepth > MAX_DEPTH) {\n        throw new RangeError(`AST parent depth exceeds max depth (${MAX_DEPTH})`);\n      }\n      block = block.parent;\n      queue = block.queue;\n    }\n\n    for (let i = 0; i < node.nodes.length; i++) {\n      const child = node.nodes[i];\n\n      if (child.type === 'comma' && node.type === 'brace') {\n        if (i === 1) queue.push('');\n        queue.push('');\n        continue;\n      }\n\n      if (child.type === 'close') {\n        q.push(append(q.pop(), queue, enclose));\n        continue;\n      }\n\n      if (child.value && child.type !== 'open') {\n        queue.push(append(queue.pop(), child.value));\n        continue;\n      }\n\n      if (child.nodes) {\n        walk(child, node, child.nodes ? depth + 1 : depth);\n      }\n    }\n\n    return queue;\n  };\n\n  return utils.flatten(walk(ast, {}, ast.type === 'root' ? 0 : 1));\n};\n\nmodule.exports = expand;\n"
+    },
+    "lib/parse.js": {
+      "before": "'use strict';\n\nconst stringify = require('./stringify');\n\n/**\n * Constants\n */\n\nconst {\n  MAX_LENGTH,\n  CHAR_BACKSLASH, /* \\ */\n  CHAR_BACKTICK, /* ` */\n  CHAR_COMMA, /* , */\n  CHAR_DOT, /* . */\n  CHAR_LEFT_PARENTHESES, /* ( */\n  CHAR_RIGHT_PARENTHESES, /* ) */\n  CHAR_LEFT_CURLY_BRACE, /* { */\n  CHAR_RIGHT_CURLY_BRACE, /* } */\n  CHAR_LEFT_SQUARE_BRACKET, /* [ */\n  CHAR_RIGHT_SQUARE_BRACKET, /* ] */\n  CHAR_DOUBLE_QUOTE, /* \" */\n  CHAR_SINGLE_QUOTE, /* ' */\n  CHAR_NO_BREAK_SPACE,\n  CHAR_ZERO_WIDTH_NOBREAK_SPACE\n} = require('./constants');\n\n/**\n * parse\n */\n\nconst parse = (input, options = {}) => {\n  if (typeof input !== 'string') {\n    throw new TypeError('Expected a string');\n  }\n\n  const opts = options || {};\n  const max = typeof opts.maxLength === 'number' ? Math.min(MAX_LENGTH, opts.maxLength) : MAX_LENGTH;\n  if (input.length > max) {\n    throw new SyntaxError(`Input length (${input.length}), exceeds max characters (${max})`);\n  }\n\n  const ast = { type: 'root', input, nodes: [] };\n  const stack = [ast];\n  let block = ast;\n  let prev = ast;\n  let brackets = 0;\n  const length = input.length;\n  let index = 0;\n  let depth = 0;\n  let value;\n\n  /**\n   * Helpers\n   */\n\n  const advance = () => input[index++];\n  const push = node => {\n    if (node.type === 'text' && prev.type === 'dot') {\n      prev.type = 'text';\n    }\n\n    if (prev && prev.type === 'text' && node.type === 'text') {\n      prev.value += node.value;\n      return;\n    }\n\n    block.nodes.push(node);\n    node.parent = block;\n    node.prev = prev;\n    prev = node;\n    return node;\n  };\n\n  push({ type: 'bos' });\n\n  while (index < length) {\n    block = stack[stack.length - 1];\n    value = advance();\n\n    /**\n     * Invalid chars\n     */\n\n    if (value === CHAR_ZERO_WIDTH_NOBREAK_SPACE || value === CHAR_NO_BREAK_SPACE) {\n      continue;\n    }\n\n    /**\n     * Escaped chars\n     */\n\n    if (value === CHAR_BACKSLASH) {\n      push({ type: 'text', value: (options.keepEscaping ? value : '') + advance() });\n      continue;\n    }\n\n    /**\n     * Right square bracket (literal): ']'\n     */\n\n    if (value === CHAR_RIGHT_SQUARE_BRACKET) {\n      push({ type: 'text', value: '\\\\' + value });\n      continue;\n    }\n\n    /**\n     * Left square bracket: '['\n     */\n\n    if (value === CHAR_LEFT_SQUARE_BRACKET) {\n      brackets++;\n\n      let next;\n\n      while (index < length && (next = advance())) {\n        value += next;\n\n        if (next === CHAR_LEFT_SQUARE_BRACKET) {\n          brackets++;\n          continue;\n        }\n\n        if (next === CHAR_BACKSLASH) {\n          value += advance();\n          continue;\n        }\n\n        if (next === CHAR_RIGHT_SQUARE_BRACKET) {\n          brackets--;\n\n          if (brackets === 0) {\n            break;\n          }\n        }\n      }\n\n      push({ type: 'text', value });\n      continue;\n    }\n\n    /**\n     * Parentheses\n     */\n\n    if (value === CHAR_LEFT_PARENTHESES) {\n      block = push({ type: 'paren', nodes: [] });\n      stack.push(block);\n      push({ type: 'text', value });\n      continue;\n    }\n\n    if (value === CHAR_RIGHT_PARENTHESES) {\n      if (block.type !== 'paren') {\n        push({ type: 'text', value });\n        continue;\n      }\n      block = stack.pop();\n      push({ type: 'text', value });\n      block = stack[stack.length - 1];\n      continue;\n    }\n\n    /**\n     * Quotes: '|\"|`\n     */\n\n    if (value === CHAR_DOUBLE_QUOTE || value === CHAR_SINGLE_QUOTE || value === CHAR_BACKTICK) {\n      const open = value;\n      let next;\n\n      if (options.keepQuotes !== true) {\n        value = '';\n      }\n\n      while (index < length && (next = advance())) {\n        if (next === CHAR_BACKSLASH) {\n          value += next + advance();\n          continue;\n        }\n\n        if (next === open) {\n          if (options.keepQuotes === true) value += next;\n          break;\n        }\n\n        value += next;\n      }\n\n      push({ type: 'text', value });\n      continue;\n    }\n\n    /**\n     * Left curly brace: '{'\n     */\n\n    if (value === CHAR_LEFT_CURLY_BRACE) {\n      depth++;\n\n      const dollar = prev.value && prev.value.slice(-1) === '$' || block.dollar === true;\n      const brace = {\n        type: 'brace',\n        open: true,\n        close: false,\n        dollar,\n        depth,\n        commas: 0,\n        ranges: 0,\n        nodes: []\n      };\n\n      block = push(brace);\n      stack.push(block);\n      push({ type: 'open', value });\n      continue;\n    }\n\n    /**\n     * Right curly brace: '}'\n     */\n\n    if (value === CHAR_RIGHT_CURLY_BRACE) {\n      if (block.type !== 'brace') {\n        push({ type: 'text', value });\n        continue;\n      }\n\n      const type = 'close';\n      block = stack.pop();\n      block.close = true;\n\n      push({ type, value });\n      depth--;\n\n      block = stack[stack.length - 1];\n      continue;\n    }\n\n    /**\n     * Comma: ','\n     */\n\n    if (value === CHAR_COMMA && depth > 0) {\n      if (block.ranges > 0) {\n        block.ranges = 0;\n        const open = block.nodes.shift();\n        block.nodes = [open, { type: 'text', value: stringify(block) }];\n      }\n\n      push({ type: 'comma', value });\n      block.commas++;\n      continue;\n    }\n\n    /**\n     * Dot: '.'\n     */\n\n    if (value === CHAR_DOT && depth > 0 && block.commas === 0) {\n      const siblings = block.nodes;\n\n      if (depth === 0 || siblings.length === 0) {\n        push({ type: 'text', value });\n        continue;\n      }\n\n      if (prev.type === 'dot') {\n        block.range = [];\n        prev.value += value;\n        prev.type = 'range';\n\n        if (block.nodes.length !== 3 && block.nodes.length !== 5) {\n          block.invalid = true;\n          block.ranges = 0;\n          prev.type = 'text';\n          continue;\n        }\n\n        block.ranges++;\n        block.args = [];\n        continue;\n      }\n\n      if (prev.type === 'range') {\n        siblings.pop();\n\n        const before = siblings[siblings.length - 1];\n        before.value += prev.value + value;\n        prev = before;\n        block.ranges--;\n        continue;\n      }\n\n      push({ type: 'dot', value });\n      continue;\n    }\n\n    /**\n     * Text\n     */\n\n    push({ type: 'text', value });\n  }\n\n  // Mark imbalanced braces and brackets as invalid\n  do {\n    block = stack.pop();\n\n    if (block.type !== 'root') {\n      block.nodes.forEach(node => {\n        if (!node.nodes) {\n          if (node.type === 'open') node.isOpen = true;\n          if (node.type === 'close') node.isClose = true;\n          if (!node.nodes) node.type = 'text';\n          node.invalid = true;\n        }\n      });\n\n      // get the location of the block on parent.nodes (block's siblings)\n      const parent = stack[stack.length - 1];\n      const index = parent.nodes.indexOf(block);\n      // replace the (invalid) block with it's nodes\n      parent.nodes.splice(index, 1, ...block.nodes);\n    }\n  } while (stack.length > 0);\n\n  push({ type: 'eos' });\n  return ast;\n};\n\nmodule.exports = parse;\n",
+      "after": "'use strict';\n\nconst stringify = require('./stringify');\n\n/**\n * Constants\n */\n\nconst {\n  MAX_DEPTH,\n  MAX_LENGTH,\n  CHAR_BACKSLASH, /* \\ */\n  CHAR_BACKTICK, /* ` */\n  CHAR_COMMA, /* , */\n  CHAR_DOT, /* . */\n  CHAR_LEFT_PARENTHESES, /* ( */\n  CHAR_RIGHT_PARENTHESES, /* ) */\n  CHAR_LEFT_CURLY_BRACE, /* { */\n  CHAR_RIGHT_CURLY_BRACE, /* } */\n  CHAR_LEFT_SQUARE_BRACKET, /* [ */\n  CHAR_RIGHT_SQUARE_BRACKET, /* ] */\n  CHAR_DOUBLE_QUOTE, /* \" */\n  CHAR_SINGLE_QUOTE, /* ' */\n  CHAR_NO_BREAK_SPACE,\n  CHAR_ZERO_WIDTH_NOBREAK_SPACE\n} = require('./constants');\n\n/**\n * parse\n */\n\nconst parse = (input, options = {}) => {\n  if (typeof input !== 'string') {\n    throw new TypeError('Expected a string');\n  }\n\n  const opts = options || {};\n  const max = typeof opts.maxLength === 'number' ? Math.min(MAX_LENGTH, opts.maxLength) : MAX_LENGTH;\n  const maxDepth = Number.isFinite(opts.maxDepth) ? Math.min(MAX_DEPTH, opts.maxDepth) : MAX_DEPTH;\n  if (input.length > max) {\n    throw new SyntaxError(`Input length (${input.length}), exceeds max characters (${max})`);\n  }\n\n  const ast = { type: 'root', input, nodes: [] };\n  const stack = [ast];\n  let block = ast;\n  let prev = ast;\n  let brackets = 0;\n  const length = input.length;\n  let index = 0;\n  let depth = 0;\n  let nesting = 0;\n  let value;\n\n  /**\n   * Helpers\n   */\n\n  const advance = () => input[index++];\n  const push = node => {\n    if (node.type === 'text' && prev.type === 'dot') {\n      prev.type = 'text';\n    }\n\n    if (prev && prev.type === 'text' && node.type === 'text') {\n      prev.value += node.value;\n      return;\n    }\n\n    block.nodes.push(node);\n    node.parent = block;\n    node.prev = prev;\n    prev = node;\n    return node;\n  };\n\n  push({ type: 'bos' });\n\n  while (index < length) {\n    block = stack[stack.length - 1];\n    value = advance();\n\n    /**\n     * Invalid chars\n     */\n\n    if (value === CHAR_ZERO_WIDTH_NOBREAK_SPACE || value === CHAR_NO_BREAK_SPACE) {\n      continue;\n    }\n\n    /**\n     * Escaped chars\n     */\n\n    if (value === CHAR_BACKSLASH) {\n      push({ type: 'text', value: (options.keepEscaping ? value : '') + advance() });\n      continue;\n    }\n\n    /**\n     * Right square bracket (literal): ']'\n     */\n\n    if (value === CHAR_RIGHT_SQUARE_BRACKET) {\n      push({ type: 'text', value: '\\\\' + value });\n      continue;\n    }\n\n    /**\n     * Left square bracket: '['\n     */\n\n    if (value === CHAR_LEFT_SQUARE_BRACKET) {\n      brackets++;\n\n      let next;\n\n      while (index < length && (next = advance())) {\n        value += next;\n\n        if (next === CHAR_LEFT_SQUARE_BRACKET) {\n          brackets++;\n          continue;\n        }\n\n        if (next === CHAR_BACKSLASH) {\n          value += advance();\n          continue;\n        }\n\n        if (next === CHAR_RIGHT_SQUARE_BRACKET) {\n          brackets--;\n\n          if (brackets === 0) {\n            break;\n          }\n        }\n      }\n\n      push({ type: 'text', value });\n      continue;\n    }\n\n    /**\n     * Parentheses\n     */\n\n    if (value === CHAR_LEFT_PARENTHESES) {\n      if (nesting >= maxDepth) {\n        throw new SyntaxError(`Input depth (${nesting + 1}), exceeds max depth (${maxDepth})`);\n      }\n      nesting++;\n      block = push({ type: 'paren', nodes: [] });\n      stack.push(block);\n      push({ type: 'text', value });\n      continue;\n    }\n\n    if (value === CHAR_RIGHT_PARENTHESES) {\n      if (block.type !== 'paren') {\n        push({ type: 'text', value });\n        continue;\n      }\n      block = stack.pop();\n      push({ type: 'text', value });\n      nesting--;\n      block = stack[stack.length - 1];\n      continue;\n    }\n\n    /**\n     * Quotes: '|\"|`\n     */\n\n    if (value === CHAR_DOUBLE_QUOTE || value === CHAR_SINGLE_QUOTE || value === CHAR_BACKTICK) {\n      const leftQuote = value;\n      // Looking for the nearest unescaped quote of the same type.\n      // @todo Use negative lookbehind after targeting the node@8.10+\n      const hasRightQuote = input.slice(index).search(new RegExp(`[^\\\\\\\\]${leftQuote}|^${leftQuote}`)) !== -1;\n\n      let next;\n\n      // If there is no right quote, consume an unpaired quote as a regular character.\n      if (hasRightQuote) {\n        if (options.keepQuotes !== true) {\n          value = '';\n        }\n\n        while (index <= length && (next = advance())) {\n          // Skip escaped quotes.\n          if (next === CHAR_BACKSLASH) {\n            value += next + advance();\n            continue;\n          }\n\n          if (next === leftQuote) {\n            if (options.keepQuotes === true) value += next;\n            break;\n          }\n\n          value += next;\n        }\n      }\n\n      push({ type: 'text', value });\n      continue;\n    }\n\n    /**\n     * Left curly brace: '{'\n     */\n\n    if (value === CHAR_LEFT_CURLY_BRACE) {\n      if (nesting >= maxDepth) {\n        throw new SyntaxError(`Input depth (${nesting + 1}), exceeds max depth (${maxDepth})`);\n      }\n      nesting++;\n      depth++;\n\n      const dollar = prev.value && prev.value.slice(-1) === '$' || block.dollar === true;\n      const brace = {\n        type: 'brace',\n        open: true,\n        close: false,\n        dollar,\n        depth,\n        commas: 0,\n        ranges: 0,\n        nodes: []\n      };\n\n      block = push(brace);\n      stack.push(block);\n      push({ type: 'open', value });\n      continue;\n    }\n\n    /**\n     * Right curly brace: '}'\n     */\n\n    if (value === CHAR_RIGHT_CURLY_BRACE) {\n      if (block.type !== 'brace') {\n        push({ type: 'text', value });\n        continue;\n      }\n\n      const type = 'close';\n      block = stack.pop();\n      block.close = true;\n\n      push({ type, value });\n      depth--;\n      nesting--;\n\n      block = stack[stack.length - 1];\n      continue;\n    }\n\n    /**\n     * Comma: ','\n     */\n\n    if (value === CHAR_COMMA && depth > 0) {\n      if (block.ranges > 0) {\n        block.ranges = 0;\n        const open = block.nodes.shift();\n        block.nodes = [open, { type: 'text', value: stringify(block) }];\n      }\n      block.invalid = false;\n\n      push({ type: 'comma', value });\n      block.commas++;\n      continue;\n    }\n\n    /**\n     * Dot: '.'\n     */\n\n    if (value === CHAR_DOT && depth > 0 && block.commas === 0) {\n      const siblings = block.nodes;\n\n      if (depth === 0 || siblings.length === 0) {\n        push({ type: 'text', value });\n        continue;\n      }\n\n      if (prev.type === 'dot') {\n        block.range = [];\n        prev.value += value;\n        prev.type = 'range';\n\n        if (block.nodes.length !== 3 && block.nodes.length !== 5) {\n          block.invalid = true;\n          block.ranges = 0;\n          prev.type = 'text';\n          continue;\n        }\n\n        block.ranges++;\n        block.args = [];\n        continue;\n      }\n\n      if (prev.type === 'range') {\n        siblings.pop();\n\n        const before = siblings[siblings.length - 1];\n        before.value += prev.value + value;\n        prev = before;\n        block.ranges--;\n        continue;\n      }\n\n      push({ type: 'dot', value });\n      continue;\n    }\n\n    /**\n     * Text\n     */\n\n    push({ type: 'text', value });\n  }\n\n  // Mark imbalanced braces and brackets as invalid\n  do {\n    block = stack.pop();\n\n    if (block.type !== 'root') {\n      block.nodes.forEach(node => {\n        if (!node.nodes) {\n          if (node.type === 'open') node.isOpen = true;\n          if (node.type === 'close') node.isClose = true;\n          if (!node.nodes) node.type = 'text';\n          node.invalid = true;\n        }\n      });\n\n      // get the location of the block on parent.nodes (block's siblings)\n      const parent = stack[stack.length - 1];\n      const index = parent.nodes.indexOf(block);\n      // replace the (invalid) block with it's nodes\n      parent.nodes.splice(index, 1, ...block.nodes);\n    }\n  } while (stack.length > 0);\n\n  push({ type: 'eos' });\n  return ast;\n};\n\nmodule.exports = parse;\n"
+    },
+    "lib/stringify.js": {
+      "before": "'use strict';\n\nconst utils = require('./utils');\n\nmodule.exports = (ast, options = {}) => {\n  const stringify = (node, parent = {}) => {\n    const invalidBlock = options.escapeInvalid && utils.isInvalidBrace(parent);\n    const invalidNode = node.invalid === true && options.escapeInvalid === true;\n    let output = '';\n\n    if (node.value) {\n      if ((invalidBlock || invalidNode) && utils.isOpenOrClose(node)) {\n        return '\\\\' + node.value;\n      }\n      return node.value;\n    }\n\n    if (node.value) {\n      return node.value;\n    }\n\n    if (node.nodes) {\n      for (const child of node.nodes) {\n        output += stringify(child);\n      }\n    }\n    return output;\n  };\n\n  return stringify(ast);\n};\n\n",
+      "after": "'use strict';\n\nconst utils = require('./utils');\nconst { MAX_DEPTH } = require('./constants');\n\nmodule.exports = (ast, options = {}) => {\n  const maxDepth = Number.isFinite(options.maxDepth) ? Math.min(MAX_DEPTH, options.maxDepth) : MAX_DEPTH;\n\n  const stringify = (node, parent = {}, depth = 0) => {\n    if (node.nodes && depth > maxDepth) {\n      throw new RangeError(`AST depth (${depth}), exceeds max depth (${maxDepth})`);\n    }\n    const invalidBlock = options.escapeInvalid && utils.isInvalidBrace(parent);\n    const invalidNode = node.invalid === true && options.escapeInvalid === true;\n    let output = '';\n\n    if (node.value) {\n      if ((invalidBlock || invalidNode) && utils.isOpenOrClose(node)) {\n        return '\\\\' + node.value;\n      }\n      return node.value;\n    }\n\n    if (node.value) {\n      return node.value;\n    }\n\n    if (node.nodes) {\n      for (const child of node.nodes) {\n        output += stringify(child, node, child.nodes ? depth + 1 : depth);\n      }\n    }\n    return output;\n  };\n\n  return stringify(ast, {}, ast.type === 'root' ? 0 : 1);\n};\n"
+    }
+  },
+  "files": {
+    "LICENSE": {
+      "original": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2"
+    },
+    "README.md": {
+      "original": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866"
+    },
+    "index.js": {
+      "original": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4"
+    },
+    "lib/compile.js": {
+      "original": "dc98f22eee3d511785d92a00758d5f0d48efed5f5813bdecc2de430c529b5c9f",
+      "patched": "b651f7715e6db8942ce61d3394357b4d81c8ece88240aa31a458ea1165edd195",
+      "upstreamProposal": "b651f7715e6db8942ce61d3394357b4d81c8ece88240aa31a458ea1165edd195"
+    },
+    "lib/constants.js": {
+      "original": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+      "patched": "f9fb688959232eee3e6ad7906a5b0e3234815db49ee857ef86983d65b917dc7c",
+      "upstreamProposal": "f9fb688959232eee3e6ad7906a5b0e3234815db49ee857ef86983d65b917dc7c"
+    },
+    "lib/expand.js": {
+      "original": "41ccc196ebfa7b7781a634e721eb744e4e7bcb54cba427a7e3d6806a1b9e58f7",
+      "patched": "9a9ddeff8be34c973665c528b94dd3fbc1657f63ea2b461887dd6f8d664c604e",
+      "upstreamProposal": "2974d5b8763a358d81dfa5b4b804329f525239f34429c396b93a540219504809"
+    },
+    "lib/parse.js": {
+      "original": "e572166565f15fa6ad9865ae49d678218e32aabfd1b3720f6d0d43d39800d310",
+      "patched": "bd02644bc5d4a64c7e67440f6653e7d28273310d3b9d597f1fa88842f4ab0c20",
+      "upstreamProposal": "bd02644bc5d4a64c7e67440f6653e7d28273310d3b9d597f1fa88842f4ab0c20"
+    },
+    "lib/stringify.js": {
+      "original": "379f22d77bfa1478341ccd49c5e4267464aabcbba03558bab332aac23fc6f23a",
+      "patched": "645f13c68af685148e9fe8eca449ee2ebb88eee0f27de7b2125fbfc175b1584d",
+      "upstreamProposal": "645f13c68af685148e9fe8eca449ee2ebb88eee0f27de7b2125fbfc175b1584d"
+    },
+    "lib/utils.js": {
+      "original": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7"
+    },
+    "package.json": {
+      "original": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+    }
+  },
+  "auditNodes": {
+    "@expo/cli": [
+      "node_modules/expo/node_modules/@expo/cli"
+    ],
+    "@expo/metro": [
+      "node_modules/@expo/metro"
+    ],
+    "@expo/metro-config": [
+      "node_modules/expo/node_modules/@expo/metro-config"
+    ],
+    "@jest/environment": [
+      "node_modules/@jest/environment"
+    ],
+    "@jest/fake-timers": [
+      "node_modules/@jest/fake-timers"
+    ],
+    "@jest/transform": [
+      "node_modules/@jest/transform"
+    ],
+    "@react-native/community-cli-plugin": [
+      "node_modules/@react-native/community-cli-plugin"
+    ],
+    "babel-jest": [
+      "node_modules/babel-jest"
+    ],
+    "braces": [
+      "node_modules/braces"
+    ],
+    "expo": [
+      "node_modules/expo"
+    ],
+    "jest-environment-node": [
+      "node_modules/jest-environment-node"
+    ],
+    "jest-haste-map": [
+      "node_modules/jest-haste-map"
+    ],
+    "jest-message-util": [
+      "node_modules/jest-message-util"
+    ],
+    "metro": [
+      "node_modules/metro"
+    ],
+    "metro-config": [
+      "node_modules/metro-config"
+    ],
+    "metro-file-map": [
+      "node_modules/metro-file-map"
+    ],
+    "metro-transform-worker": [
+      "node_modules/metro-transform-worker"
+    ],
+    "micromatch": [
+      "node_modules/micromatch"
+    ],
+    "react-native": [
+      "node_modules/react-native"
+    ]
+  },
+  "auditEdges": {
+    "@expo/cli": [
+      "@expo/metro",
+      "@expo/metro-config"
+    ],
+    "@expo/metro": [
+      "metro",
+      "metro-config",
+      "metro-file-map",
+      "metro-transform-worker"
+    ],
+    "@expo/metro-config": [
+      "@expo/metro"
+    ],
+    "@jest/environment": [
+      "@jest/fake-timers"
+    ],
+    "@jest/fake-timers": [
+      "jest-message-util"
+    ],
+    "@jest/transform": [
+      "jest-haste-map",
+      "micromatch"
+    ],
+    "@react-native/community-cli-plugin": [
+      "metro",
+      "metro-config"
+    ],
+    "babel-jest": [
+      "@jest/transform"
+    ],
+    "braces": [],
+    "expo": [
+      "@expo/cli",
+      "@expo/metro",
+      "@expo/metro-config"
+    ],
+    "jest-environment-node": [
+      "@jest/environment",
+      "@jest/fake-timers"
+    ],
+    "jest-haste-map": [
+      "micromatch"
+    ],
+    "jest-message-util": [
+      "micromatch"
+    ],
+    "metro": [
+      "metro-config",
+      "metro-file-map",
+      "metro-transform-worker"
+    ],
+    "metro-config": [
+      "metro"
+    ],
+    "metro-file-map": [
+      "micromatch"
+    ],
+    "metro-transform-worker": [
+      "metro"
+    ],
+    "micromatch": [
+      "braces"
+    ],
+    "react-native": [
+      "@react-native/community-cli-plugin",
+      "babel-jest",
+      "jest-environment-node"
+    ]
+  },
+  "auditPackages": {
+    "node_modules/expo/node_modules/@expo/cli": {
+      "version": "54.0.27",
+      "resolved": "https://registry.npmjs.org/@expo/cli/-/cli-54.0.27.tgz",
+      "integrity": "sha512-BxKOr6e8wmUwhGSyEVKY+CHWgS3Cre9ibgx1QWcdCenKTVKAz62qGmYL51q0lCcKg6vQY+4Usw9RK5Il4ZFaIA=="
+    },
+    "node_modules/@expo/metro": {
+      "version": "54.2.0",
+      "resolved": "https://registry.npmjs.org/@expo/metro/-/metro-54.2.0.tgz",
+      "integrity": "sha512-h68TNZPGsk6swMmLm9nRSnE2UXm48rWwgcbtAHVMikXvbxdS41NDHHeqg1rcQ9AbznDRp6SQVC2MVpDnsRKU1w=="
+    },
+    "node_modules/expo/node_modules/@expo/metro-config": {
+      "version": "54.0.17",
+      "resolved": "https://registry.npmjs.org/@expo/metro-config/-/metro-config-54.0.17.tgz",
+      "integrity": "sha512-PQFgQCZGY0DffZUvBzJttDPreZfHrQakaBlKjnvOUMNXbDna+TYmg1IFZuIDUYJezLcdp+TvVFTLjNi1+mqaVw=="
+    },
+    "node_modules/@jest/environment": {
+      "version": "29.7.0",
+      "resolved": "https://registry.npmjs.org/@jest/environment/-/environment-29.7.0.tgz",
+      "integrity": "sha512-aQIfHDq33ExsN4jP1NWGXhxgQ/wixs60gDiKO+XVMd8Mn0NWPWgc34ZQDTb2jKaUWQ7MuwoitXAsN2XVXNMpAw=="
+    },
+    "node_modules/@jest/fake-timers": {
+      "version": "29.7.0",
+      "resolved": "https://registry.npmjs.org/@jest/fake-timers/-/fake-timers-29.7.0.tgz",
+      "integrity": "sha512-q4DH1Ha4TTFPdxLsqDXK1d3+ioSL7yL5oCMJZgDYm6i+6CygW5E5xVr/D1HdsGxjt1ZWSfUAs9OxSB/BNelWrQ=="
+    },
+    "node_modules/@jest/transform": {
+      "version": "29.7.0",
+      "resolved": "https://registry.npmjs.org/@jest/transform/-/transform-29.7.0.tgz",
+      "integrity": "sha512-ok/BTPFzFKVMwO5eOHRrvnBVHdRy9IrsrW1GpMaQ9MCnilNLXQKmAX8s1YXDFaai9xJpac2ySzV0YeRRECr2Vw=="
+    },
+    "node_modules/@react-native/community-cli-plugin": {
+      "version": "0.81.5",
+      "resolved": "https://registry.npmjs.org/@react-native/community-cli-plugin/-/community-cli-plugin-0.81.5.tgz",
+      "integrity": "sha512-yWRlmEOtcyvSZ4+OvqPabt+NS36vg0K/WADTQLhrYrm9qdZSuXmq8PmdJWz/68wAqKQ+4KTILiq2kjRQwnyhQw=="
+    },
+    "node_modules/babel-jest": {
+      "version": "29.7.0",
+      "resolved": "https://registry.npmjs.org/babel-jest/-/babel-jest-29.7.0.tgz",
+      "integrity": "sha512-BrvGY3xZSwEcCzKvKsCi2GgHqDqsYkOP4/by5xCgIwGXQxIEh+8ew3gmrE1y7XRR6LHZIj6yLYnUi/mm2KXKBg=="
+    },
+    "node_modules/braces": {
+      "version": "3.0.3",
+      "resolved": "https://registry.npmjs.org/braces/-/braces-3.0.3.tgz",
+      "integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA=="
+    },
+    "node_modules/expo": {
+      "version": "54.0.37",
+      "resolved": "https://registry.npmjs.org/expo/-/expo-54.0.37.tgz",
+      "integrity": "sha512-afzbtO4i/K9ZCrzyLgEOaXW56w/yuAK61JkCOMrw/S/VFCAp6YwKWA494X5mIcrVmRAmclv/ec7ga8ndTkzhxw=="
+    },
+    "node_modules/jest-environment-node": {
+      "version": "29.7.0",
+      "resolved": "https://registry.npmjs.org/jest-environment-node/-/jest-environment-node-29.7.0.tgz",
+      "integrity": "sha512-DOSwCRqXirTOyheM+4d5YZOrWcdu0LNZ87ewUoywbcb2XR4wKgqiG8vNeYwhjFMbEkfju7wx2GYH0P2gevGvFw=="
+    },
+    "node_modules/jest-haste-map": {
+      "version": "29.7.0",
+      "resolved": "https://registry.npmjs.org/jest-haste-map/-/jest-haste-map-29.7.0.tgz",
+      "integrity": "sha512-fP8u2pyfqx0K1rGn1R9pyE0/KTn+G7PxktWidOBTqFPLYX0b9ksaMFkhK5vrS3DVun09pckLdlx90QthlW7AmA=="
+    },
+    "node_modules/jest-message-util": {
+      "version": "29.7.0",
+      "resolved": "https://registry.npmjs.org/jest-message-util/-/jest-message-util-29.7.0.tgz",
+      "integrity": "sha512-GBEV4GRADeP+qtB2+6u61stea8mGcOT4mCtrYISZwfu9/ISHFJ/5zOMXYbpBE9RsS5+Gb63DW4FgmnKJ79Kf6w=="
+    },
+    "node_modules/metro": {
+      "version": "0.83.3",
+      "resolved": "https://registry.npmjs.org/metro/-/metro-0.83.3.tgz",
+      "integrity": "sha512-+rP+/GieOzkt97hSJ0MrPOuAH/jpaS21ZDvL9DJ35QYRDlQcwzcvUlGUf79AnQxq/2NPiS/AULhhM4TKutIt8Q=="
+    },
+    "node_modules/metro-config": {
+      "version": "0.83.3",
+      "resolved": "https://registry.npmjs.org/metro-config/-/metro-config-0.83.3.tgz",
+      "integrity": "sha512-mTel7ipT0yNjKILIan04bkJkuCzUUkm2SeEaTads8VfEecCh+ltXchdq6DovXJqzQAXuR2P9cxZB47Lg4klriA=="
+    },
+    "node_modules/metro-file-map": {
+      "version": "0.83.3",
+      "resolved": "https://registry.npmjs.org/metro-file-map/-/metro-file-map-0.83.3.tgz",
+      "integrity": "sha512-jg5AcyE0Q9Xbbu/4NAwwZkmQn7doJCKGW0SLeSJmzNB9Z24jBe0AL2PHNMy4eu0JiKtNWHz9IiONGZWq7hjVTA=="
+    },
+    "node_modules/metro-transform-worker": {
+      "version": "0.83.3",
+      "resolved": "https://registry.npmjs.org/metro-transform-worker/-/metro-transform-worker-0.83.3.tgz",
+      "integrity": "sha512-Ztekew9t/gOIMZX1tvJOgX7KlSLL5kWykl0Iwu2cL2vKMKVALRl1hysyhUw0vjpAvLFx+Kfq9VLjnHIkW32fPA=="
+    },
+    "node_modules/micromatch": {
+      "version": "4.0.8",
+      "resolved": "https://registry.npmjs.org/micromatch/-/micromatch-4.0.8.tgz",
+      "integrity": "sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA=="
+    },
+    "node_modules/react-native": {
+      "version": "0.81.5",
+      "resolved": "https://registry.npmjs.org/react-native/-/react-native-0.81.5.tgz",
+      "integrity": "sha512-1w+/oSjEXZjMqsIvmkCRsOc8UBYv163bTWKTI8+1mxztvQPhCRYGTvZ/PL1w16xXHneIj/SLGfxWg2GWN2uexw=="
+    }
+  },
+  "micromatchConsumers": {
+    "node_modules/@jest/transform": "29.7.0",
+    "node_modules/jest-haste-map": "29.7.0",
+    "node_modules/jest-message-util": "29.7.0",
+    "node_modules/metro-file-map": "0.83.3"
+  }
+}

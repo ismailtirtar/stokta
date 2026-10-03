@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { verifyNodeForgePatch } from "./node-forge-patch.mjs";
+import { verifyBracesPatch } from "./braces-patch.mjs";
 
 const allowlist = JSON.parse(
   readFileSync(new URL("../security/npm-audit-allowlist.json", import.meta.url), "utf8"),
@@ -81,6 +82,12 @@ try {
 } catch (error) {
   fail(`node-forge mitigation was not verified: ${error.message}`);
 }
+let bracesProof;
+try {
+  bracesProof = verifyBracesPatch();
+} catch (error) {
+  fail(`braces mitigation was not verified: ${error.message}`);
+}
 if (severe.length === 0) {
   console.log("Production dependency audit passed with no high or critical findings.");
   process.exit(0);
@@ -94,27 +101,26 @@ const forgeEdges = {
   "@expo/cli": ["node-forge", "@expo/code-signing-certificates"],
   expo: ["@expo/cli"],
 };
-function inspectFinding(name, ancestors = new Set()) {
-  if (evidenceCache.has(name)) return evidenceCache.get(name);
+// npm's indirect records may contain the actual Metro dependency cycle. First
+// validate every reachable record; then propagate only bounded advisory evidence
+// until a fixed point. A cycle cannot create its own evidence.
+const graph = new Map();
+const pending = severe.map(([name]) => name);
+while (pending.length > 0) {
+  const name = pending.pop();
+  if (graph.has(name)) continue;
   const vulnerability = report.vulnerabilities[name];
-  if (!vulnerability || ancestors.has(name)) {
+  if (!vulnerability) {
     unexpected.push(`${name}: missing or cyclic advisory provenance`);
-    return new Set();
+    continue;
   }
   const evidence = new Set();
-  const chain = new Set([...ancestors, name]);
+  const children = [];
   for (const entry of vulnerability.via) {
     if (typeof entry === "string") {
-      const childEvidence = inspectFinding(entry, chain);
-      for (const kind of childEvidence) {
-        if (kind === "forge" && !forgeEdges[name]?.includes(entry)) {
-          unexpected.push(`${name}: uncovered node-forge consumer chain via ${entry}`);
-        } else if (kind === "metro" && !allowedPackages.has(name)) {
-          unexpected.push(`${name}: package is outside the Metro exception`);
-        } else {
-          evidence.add(kind);
-        }
-      }
+      children.push(entry);
+      pending.push(entry);
+      if (entry === name) unexpected.push(`${name}: missing or cyclic advisory provenance (self-loop)`);
       continue;
     }
     const advisoryUrl = entry && typeof entry.url === "string" ? entry.url : "";
@@ -125,22 +131,108 @@ function inspectFinding(name, ancestors = new Set()) {
       entry.name === name && entry.dependency === name && entry.severity === "high" && entry.range === "<=1.4.0") {
       evidence.add("forge");
       observedAdvisories.add(advisoryUrl);
+    } else if (name === "braces" && vulnerability.severity === "high" && advisoryUrl === bracesProof.advisory &&
+      entry.name === name && entry.dependency === name && entry.severity === "high" && entry.range === "<=3.0.3") {
+      evidence.add("braces");
+      observedAdvisories.add(advisoryUrl);
     } else {
       unexpected.push(`${name}: unexpected advisory ${advisoryUrl || "without URL"}`);
     }
   }
-  if (evidence.has("forge")) {
-    const expected = forgeProof.auditNodes[name];
-    if (!expected || !Array.isArray(vulnerability.nodes) ||
-      JSON.stringify([...vulnerability.nodes].sort()) !== JSON.stringify(expected)) {
-      unexpected.push(`${name}: audit includes uncovered node-forge installation paths`);
+  graph.set(name, children);
+  evidenceCache.set(name, evidence);
+}
+let changed;
+do {
+  changed = false;
+  for (const [name, children] of graph) {
+    const evidence = evidenceCache.get(name);
+    for (const child of children) {
+      for (const kind of evidenceCache.get(child) ?? []) {
+        const covered = kind === "forge" ? forgeEdges[name]?.includes(child)
+          : kind === "braces" ? bracesProof.auditEdges[name]?.includes(child)
+          : allowedPackages.has(name);
+        if (covered && !evidence.has(kind)) {
+          evidence.add(kind);
+          changed = true;
+        }
+      }
+    }
+  }
+} while (changed);
+for (const [name, children] of graph) {
+  const evidence = evidenceCache.get(name);
+  for (const child of children) {
+    for (const kind of evidenceCache.get(child) ?? []) {
+      if (kind === "forge" && !forgeEdges[name]?.includes(child)) {
+        unexpected.push(`${name}: uncovered node-forge consumer chain via ${child}`);
+      } else if (kind === "braces" && !bracesProof.auditEdges[name]?.includes(child)) {
+        unexpected.push(`${name}: uncovered braces consumer chain via ${child}`);
+      } else if (kind === "metro" && !allowedPackages.has(name)) {
+        unexpected.push(`${name}: package is outside the Metro exception`);
+      }
+    }
+  }
+  for (const [kind, proof] of [["forge", forgeProof], ["braces", bracesProof]]) {
+    if (!evidence.has(kind)) continue;
+    const expected = proof.auditNodes[name];
+    const nodes = report.vulnerabilities[name].nodes;
+    if (!expected || !Array.isArray(nodes) ||
+      JSON.stringify([...nodes].sort()) !== JSON.stringify([...expected].sort())) {
+      unexpected.push(`${name}: audit includes uncovered ${kind === "forge" ? "node-forge" : "braces"} installation paths`);
     }
   }
   if (evidence.size === 0) unexpected.push(`${name}: no verified advisory provenance`);
-  evidenceCache.set(name, evidence);
-  return evidence;
 }
-for (const [name] of severe) inspectFinding(name);
+
+// Find strongly connected components without recursively walking untrusted
+// audit data. Only the pinned Metro component may cycle, and only when every
+// member reaches the verified braces leaf through its exact policy edges.
+const seen = new Set();
+const order = [];
+for (const start of graph.keys()) {
+  if (seen.has(start)) continue;
+  seen.add(start);
+  const stack = [[start, 0]];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    const children = graph.get(frame[0]);
+    if (frame[1] < children.length) {
+      const child = children[frame[1]++];
+      if (graph.has(child) && !seen.has(child)) {
+        seen.add(child);
+        stack.push([child, 0]);
+      }
+    } else {
+      order.push(frame[0]);
+      stack.pop();
+    }
+  }
+}
+const reversed = new Map([...graph.keys()].map((name) => [name, []]));
+for (const [name, children] of graph) {
+  for (const child of children) reversed.get(child)?.push(name);
+}
+seen.clear();
+const expectedMetroCycle = ["metro", "metro-config", "metro-transform-worker"];
+for (const start of order.reverse()) {
+  if (seen.has(start)) continue;
+  const component = [];
+  const stack = [start];
+  seen.add(start);
+  while (stack.length > 0) {
+    const name = stack.pop();
+    component.push(name);
+    for (const parent of reversed.get(name)) {
+      if (!seen.has(parent)) { seen.add(parent); stack.push(parent); }
+    }
+  }
+  if (component.length <= 1) continue;
+  const covered = JSON.stringify(component.sort()) === JSON.stringify(expectedMetroCycle)
+    && component.every((name) => evidenceCache.get(name).has("braces")
+      && graph.get(name).every((child) => bracesProof.auditEdges[name]?.includes(child)));
+  if (!covered) unexpected.push(`${component.join(", ")}: missing or cyclic advisory provenance`);
+}
 
 if (unexpected.length > 0) fail("new or changed high/critical findings detected", unexpected);
 if (observedAdvisories.size === 0) {
@@ -150,6 +242,9 @@ if (observedAdvisories.size === 0) {
 console.log("Production dependency audit passed with verified, bounded mitigations.");
 if (observedAdvisories.has(forgeProof.advisory)) {
   console.warn(`node-forge ${forgeProof.version}: local upstream patch verified (${forgeProof.fileCount} file hashes, ${forgeProof.cases} RSA parser cases); review expires ${forgeProof.expiresOn}. npm audit still flags the published version.`);
+}
+if (observedAdvisories.has(bracesProof.advisory)) {
+  console.warn(`braces ${bracesProof.version}: local mitigation verified (${bracesProof.fileCount} file hashes, ${bracesProof.cases} bounded parser cases); review expires ${bracesProof.expiresOn}. npm audit still flags the published version.`);
 }
 if ([...observedAdvisories].some((advisory) => allowedAdvisories.has(advisory))) {
   console.warn(`Temporary, documented Metro/image-size exception through ${allowlist.expiresOn}.`);
