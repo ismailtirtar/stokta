@@ -216,6 +216,7 @@ function NativeSubscriptionModal({
         setStoreMessage(googlePurchase.isSuspendedAndroid
           ? "Google Play aboneliği ödeme sorunu nedeniyle askıda. Ödeme yönteminizi Google Play'de güncelleyin; ardından satın alımları geri yükleyin."
           : "Ödeme henüz tamamlanmadı. Abonelik yalnızca Google Play onayından sonra açılır.");
+        await onSubscriptionUpdatedRef.current();
         return;
       }
 
