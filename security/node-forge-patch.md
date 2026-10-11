@@ -4,7 +4,7 @@
 
 İç `DigestAlgorithm` eleman sayımına ek olarak, içerik taşıyan NULL parametresi ve standart dışı DER uzunluk kodlamalarının kabulü yeniden üretildi ve aşağıdaki dar kapsamlı yama ile giderildi. Eski yama yeni kodlama vakalarının 84/84'ünü varsayılan doğrulamada kabul ediyordu. Yeni yama bunları ana kaynakta ve iki dağıtım bundle'ında reddeder. Bu sonuç, bütün kriptografik uygulamanın güvenli olduğunun veya özel anahtar olmadan imza sahteciliğinin kanıtı değildir.
 
-**Yayın engeli korunur.** Bu değişiklik güvenlik davranışını ve kanıtı günceller; yayın onayı vermez. `audit:production` temiz rapor ve koşullu azaltım yollarında açık hata ile durmaya devam eder. `verify:release`, ilgili CI, yeni Android/Play derlemesi ve EAS yayın ön kontrolü bu engeli devralır. Engelin kaldırılması, güncel commit'in yayın kontrolleri tamamlandıktan sonra ayrı bir değişiklik olmalıdır. Sürüm sabitlemesi, tüketiciler, lockfile, audit istisnaları ve 2 Kasım inceleme tarihi değiştirilmemiştir.
+**Bu ayrı değişiklik node-forge'a özgü geçici yayın engelini kaldırır.** Güvenlik düzeltmesi [PR #28](https://github.com/ismailtirtar/stokta/pull/28) ve `af3b2f5668926d49e3b76b1f6927669c5ea51306` kaynağında engel korunarak doğrulandı. Kaynak CI'da 196 test, üç tip kontrolü, çevrimiçi Expo uyumluluğu ve Android export geçti; üç iş akışının audit adımları yalnız kasıtlı engelde durdu. Bu sonraki değişiklik koşulsuz engel dosyasını ve onun üç politika testini kaldırır. `audit:production` normal rapor, danışman/graph ve iki yama bütünlüğü/davranış denetimlerini korur. `verify:release`, CI ve EAS ön kontrolleri zorunludur. Sürüm sabitlemesi, tüketiciler, lockfile, audit istisnaları ve 2 Kasım inceleme tarihi değiştirilmemiştir. Bu, Play'de yayınlandığı anlamına gelmez.
 
 11 Ekim kontrolünde npm'in güncel node-forge sürümü 1.4.0'dır; [GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv) yamalı sürüm belirtmez ve [upstream PR #1152](https://github.com/digitalbazaar/forge/pull/1152) açık durumdadır. Bu çalışma resmî veya birleştirilmiş upstream düzeltmesi değildir.
 
@@ -69,6 +69,9 @@ Her yama denetimi üç girişte, e=3/e=65537 ve geçici 2048 bit test anahtarlar
 | `EXPO_OFFLINE=1 EXPO_NO_TELEMETRY=1 expo install --check` | Yerel SDK uyumluluk eşlemesi başarılı; güncel uzak sürüm listesi sorgulanmadı |
 | Kullanıcı izniyle çevrimiçi `expo install --check` | Başarılı: `Dependencies are up to date` |
 | Kullanıcı izniyle güncel production audit | Ham rapor 22 high / 0 critical; dört bilinen kök danışman. Kapsam/bütünlük denetimi geçti; yalnız mevcut yayın engeli exit 1 üretti |
+| Ayrı engel kaldırma değişikliğinin yakın regresyonları | 79/79 geçti; bilinmeyen danışman, kritik bulgu, eksik/değişmiş yama ve süre sonu hâlâ reddedilir |
+| Ayrı engel kaldırma değişikliğinin audit ve kaynak testleri | Gerçek production audit başarılı; 193/193 test geçti. Azalan üç test yalnız kaldırılan koşulsuz engelin politika testleridir |
+| Ayrı engel kaldırma değişikliğinin tam `npm run verify:release` kontrolü | Audit, üç TypeScript kontrolü, 193 test, çevrimiçi Expo kontrolü ve 674 modüllük Android/Hermes export başarılı |
 | Expo Android export ve source map | 674 Metro modülüyle Hermes çıktısı başarılı; source map'te Forge yok |
 
 Bozuk DigestInfo'lar test özel anahtarıyla imzalanır. Testler ayrıştırıcının ret davranışını gösterir; özel anahtar olmadan saldırı gösterimi değildir. Uygulama/EAS imzalama anahtarları kullanılmaz ve üretilen test özel anahtarları diske yazılmaz. Upstream test kaynakları resmî v1.4.0 etiketinden alınmış ve Git blob özetleriyle kontrol edilmiştir; bu tablo tam upstream test paketi iddiası değildir.
@@ -77,7 +80,7 @@ Bozuk DigestInfo'lar test özel anahtarıyla imzalanır. Testler ayrıştırıc�
 
 İlk çevrimiçi kontrol girişimleri, özel proje meta verisi paylaşımı için açık izin bulunmadığı gerekçesiyle otomatik onay incelemesinde reddedilmişti. Kullanıcı 11 Ekim'de npm/Expo paylaşımına açık izin verdi. Sonraki çevrimiçi Expo SDK kontrolü başarılıdır. Güncel `npm audit --omit=dev --json`, 22 high / 0 critical ve yalnız dört bilinen kök danışman (node-forge, braces ve iki image-size danışmanı) döndürdü; yeni danışman yoktur. Gerçek `audit:production` rapor/kapsam ve iki yama denetimini geçti; yalnız korunmuş node-forge yayın engeli nedeniyle exit 1 ile durdu. Ham rapor sıfır açık olarak sunulmaz.
 
-Verilen izin PR iş akışlarındaki aynı çevrimiçi kontrolleri de kapsar. Düzeltmenin CI doğrulaması ilerletilebilir; engeli kaldırma ayrı değişikliktir. Yeni imzalı Android AAB, cihaz/emülatör smoke testi ve Play kanal doğrulaması henüz eksiktir. Bu dalda yayın engelinin başarısız olması beklenen politika davranışıdır; yerel testlerin geçmesi `verify:release` onayı değildir.
+Verilen izin PR iş akışlarındaki aynı çevrimiçi kontrolleri de kapsar. PR #28'in kaynak CI testleri, tipler, Expo ve Android export adımları başarılıdır; yalnız korunan yayın engeli başarısızdır. Engel kaldırma bu sonraki ayrı değişikliktedir. Son HEAD'in tam yayın CI'sı, yeni imzalı Android AAB, cihaz/emülatör smoke testi ve Play kanal doğrulaması henüz tamamlandı sayılmaz. Yerel testlerin geçmesi bu kapıların hepsinin veya mağaza yayınının kanıtı değildir.
 
 Ham audit yayımlanmış 1.4.0 sürümünü değerlendirmeye devam eder; yerel patch onun sürüm etiketini değiştirmez. Audit kodundaki node-forge danışman/graph kapsamı ile Metro/image-size geçici istisnası bu değişiklikte genişletilmemiştir. Geçici istisnaların kaldırılması veya yeniden değerlendirilmesi, yayın engelini kaldıran ayrı incelemenin parçası olmalıdır.
 

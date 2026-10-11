@@ -2,7 +2,6 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { verifyNodeForgePatch } from "./node-forge-patch.mjs";
 import { verifyBracesPatch } from "./braces-patch.mjs";
-import { assertNodeForgeReleaseAssurance } from "./node-forge-release-assurance.mjs";
 
 const allowlist = JSON.parse(
   readFileSync(new URL("../security/npm-audit-allowlist.json", import.meta.url), "utf8"),
@@ -12,17 +11,6 @@ function fail(message, details = []) {
   console.error(`Production dependency audit failed: ${message}`);
   for (const detail of details) console.error(`- ${detail}`);
   process.exit(1);
-}
-
-// Keep audit diagnostics and integrity checks, but never turn partial parser
-// coverage into release approval. This guard applies to both success paths.
-function pass(message) {
-  try {
-    assertNodeForgeReleaseAssurance();
-  } catch (error) {
-    fail(error.message);
-  }
-  console.log(message);
 }
 
 if (!/^\d{4}-\d{2}-\d{2}$/.test(allowlist.expiresOn ?? "")) {
@@ -101,7 +89,7 @@ try {
   fail(`braces mitigation was not verified: ${error.message}`);
 }
 if (severe.length === 0) {
-  pass("Production dependency audit passed with no high or critical findings.");
+  console.log("Production dependency audit passed with no high or critical findings.");
   process.exit(0);
 }
 
@@ -251,9 +239,9 @@ if (observedAdvisories.size === 0) {
   fail("allowlisted package chain no longer resolves to the documented advisories");
 }
 
-pass("Production dependency audit passed with verified, bounded mitigations.");
+console.log("Production dependency audit passed with verified, bounded mitigations.");
 if (observedAdvisories.has(forgeProof.advisory)) {
-  console.warn(`node-forge ${forgeProof.version}: local upstream patch verified (${forgeProof.fileCount} file hashes, ${forgeProof.cases} RSA parser cases); review expires ${forgeProof.expiresOn}. npm audit still flags the published version.`);
+  console.warn(`node-forge ${forgeProof.version}: reviewed local patch verified (${forgeProof.fileCount} file hashes, ${forgeProof.cases} RSA parser cases); review expires ${forgeProof.expiresOn}. npm audit still flags the published version.`);
 }
 if (observedAdvisories.has(bracesProof.advisory)) {
   console.warn(`braces ${bracesProof.version}: local mitigation verified (${bracesProof.fileCount} file hashes, ${bracesProof.cases} bounded parser cases); review expires ${bracesProof.expiresOn}. npm audit still flags the published version.`);

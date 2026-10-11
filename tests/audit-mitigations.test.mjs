@@ -51,13 +51,13 @@ process.exit(JSON.parse(payload).metadata.vulnerabilities.total ? 1 : 0);
   } finally { fixture.cleanup(); }
 }
 
-test("Geçerli braces zinciri açık node-forge yayın engelini kaldıramaz", () => {
+test("Geçerli braces zinciri doğrulanmış yamalarla yayın denetimini geçer", () => {
   const result = runAudit(bracesFindings());
-  assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /node-forge release assurance is blocked/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Production dependency audit passed with verified, bounded mitigations/);
 });
 
-test("Birleşik braces ve node-forge kanıtları yayın güvencesi için yeterli değildir", () => {
+test("Birleşik braces ve node-forge azaltımları yalnız doğrulanmış zincirleri kapsar", () => {
   const findings = bracesFindings();
   findings["node-forge"] = { name: "node-forge", severity: "high", nodes: forgePolicy.installPaths, via: [{
     url: forgePolicy.advisory, name: "node-forge", dependency: "node-forge", severity: "high", range: "<=1.4.0",
@@ -65,8 +65,8 @@ test("Birleşik braces ve node-forge kanıtları yayın güvencesi için yeterli
   findings["@expo/code-signing-certificates"] = { name: "@expo/code-signing-certificates", severity: "high", nodes: forgePolicy.auditNodes["@expo/code-signing-certificates"], via: ["node-forge"] };
   findings["@expo/cli"].via.push("node-forge", "@expo/code-signing-certificates");
   const result = runAudit(findings);
-  assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /node-forge release assurance is blocked/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Production dependency audit passed with verified, bounded mitigations/);
 });
 
 for (const [label, mutate] of [

@@ -52,10 +52,10 @@ process.exit(fixture.status);
   }
 }
 
-test("Temiz bağımlılık raporu açık node-forge kapsam boşluğunu kapatamaz", () => {
+test("Temiz bağımlılık raporu doğrulanmış yamalarla yayın kontrolünü geçer", () => {
   const result = runAudit(report());
-  assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /node-forge release assurance is blocked/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Production dependency audit passed with no high or critical findings/);
 });
 
 for (const [label, payload, status] of [
@@ -92,7 +92,7 @@ test("Yamasız node-forge imza doğrulama açığı yayın izni alamaz", () => {
   assert.match(result.stderr, /node-forge mitigation was not verified/);
 });
 
-test("Mevcut node-forge yaması ve bilinen Expo zinciri yayın güvencesi vermez", () => {
+test("Doğrulanmış node-forge yaması yalnız bilinen Expo zincirini kapsar", () => {
   const payload = report({
     "node-forge": forge,
     "@expo/code-signing-certificates": { name: "@expo/code-signing-certificates", severity: "high", via: ["node-forge"], nodes: patchPolicy.auditNodes["@expo/code-signing-certificates"] },
@@ -100,9 +100,9 @@ test("Mevcut node-forge yaması ve bilinen Expo zinciri yayın güvencesi vermez
     expo: { name: "expo", severity: "high", via: ["@expo/cli"], nodes: patchPolicy.auditNodes.expo },
   });
   const result = runAudit(payload, 1);
-  assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /node-forge release assurance is blocked/);
-  assert.match(result.stderr, /60 parser cases do not establish complete mitigation/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Production dependency audit passed with verified, bounded mitigations/);
+  assert.match(result.stderr, /228 RSA parser cases/);
 });
 
 for (const [label, changed] of [
@@ -161,8 +161,8 @@ test("Bilinmeyen önem derecesi temiz rapor sayılmaz", () => {
 test("Önceden belgelenen Metro istisnası yeni danışmanları kapsamaz", () => {
   const imageSize = { name: "image-size", severity: "high", via: [{ url: allowlist.allowedAdvisories[0] }] };
   const bounded = runAudit(report({ "image-size": imageSize }), 1);
-  assert.equal(bounded.status, 1);
-  assert.match(bounded.stderr, /node-forge release assurance is blocked/);
+  assert.equal(bounded.status, 0, bounded.stderr);
+  assert.match(bounded.stdout, /Production dependency audit passed with verified, bounded mitigations/);
   const changed = { ...imageSize, via: [{ url: forge.via[0].url }] };
   assert.equal(runAudit(report({ "image-size": changed }), 1).status, 1);
 });
