@@ -1,8 +1,16 @@
 # node-forge 1.4.0 yerel güvenlik yaması
 
+## Güncel yayın engeli — 11 Ekim 2026
+
+Mevcut 60 vakanın geçmesi bozuk kodlamaların tamamının reddedildiğini veya ilgili güvenlik açığının tümüyle giderildiğini kanıtlamaz. Kodlama kapsamı açık kaldığı için yayın güvencesi bekletilir. Üretim yolunda erişilebilirlik veya gerçek imza sahteciliği kanıtlanmış değildir; bu belgedeki önceki sonuçlar yalnız belirtilen vaka kapsamına aittir.
+
+`audit:production` mevcut rapor/bütünlük kontrollerini korur, fakat hem temiz rapor hem koşullu azaltım başarı yolunda açık hata ile durur. `verify:release`, ona bağlı CI doğrulaması, yeni Android/Play derlemesi ve EAS yayın ön kontrolü bu engeli devralır. Ham `npm audit --omit=dev --json` tanı için kullanılabilir; yayın onayı vermez. Mevcut kurulum yaması, hash'ler, sürüm, tüketiciler ve 2 Kasım inceleme tarihi değiştirilmez. Dağıtılmış uygulama etkilenmez.
+
+Engel zamanla kendiliğinden kalkmaz ve ortam değişkeniyle atlanamaz. Kaldırılması; kapsam boşluğunu ele alan, kaynak/bağımlılık ve tüketici etkisi incelenmiş ayrı bir düzeltme, açık doğrulama sınırları ve güncel commit için yayın kanıtıyla gözden geçirilmelidir. Yeni bir upstream önerisi yalnız var olduğu için uygulanmaz. Aşağıdaki yama açıklaması tarihsel ve sınırlı kapsamı belgeler; güncel yayın izni değildir.
+
 GHSA-86w9-cpqp-85rv, RSA PKCS#1 v1.5 doğrulamasının nested `DigestAlgorithm` SEQUENCE içindeki fazladan elemanları kabul etmesidir. node-forge 1.4.0 dış `DigestInfo` uzunluğunu kontrol ederken bu iç yapıyı kontrol etmez. 2 Ekim 2026 kontrolünde npm'in güncel sürümü 1.4.0, resmî danışmanda yamalı sürüm yok ve upstream PR #1152 henüz açık durumdadır. Yerel yama resmî bir node-forge sürümü veya upstream tarafından birleştirilmiş düzeltme olarak sunulmaz.
 
-Yama, iç yapının yalnız OID ve varsa NULL parametresinden oluşmasını zorunlu kılar. `lib/rsa.js` son içeriği upstream önerisinin `ceba34402e329f0365134f23fe19898756527d65` commit'indeki dosyayla bayt bazında aynıdır. Aynı koşul, npm paketinde ayrıca dağıtılan `dist/forge.min.js` ve `dist/forge.all.min.js` dosyalarına da uygulanır; bundle'lar yeniden derlenmez. Sürüm etiketi 1.4.0 olarak kalır, alternatif registry veya fork kullanılmaz.
+Yama, iç yapının eleman sayısını OID ve isteğe bağlı parametre sayısıyla sınırlar; bu tek başına tüm kodlama kurallarını doğrulamaz. `lib/rsa.js` son içeriği upstream önerisinin `ceba34402e329f0365134f23fe19898756527d65` commit'indeki dosyayla bayt bazında aynıdır. Aynı koşul, npm paketinde ayrıca dağıtılan `dist/forge.min.js` ve `dist/forge.all.min.js` dosyalarına da uygulanır; bundle'lar yeniden derlenmez. Sürüm etiketi 1.4.0 olarak kalır, alternatif registry veya fork kullanılmaz.
 
 ## Kaynak ve kurulum
 
@@ -31,7 +39,7 @@ Her doğrulamada ana kaynak ve iki tarayıcı girişinde, 2048 bitlik geçici te
 
 Bu vakalarda bozuk encodings test özel anahtarıyla imzalanır. Testler ayrıştırıcının red davranışını kanıtlar; özel anahtar olmadan üretilmiş yeni bir saldırı gösterimi veya tüm kriptografik uygulamanın ispatı değildir. Uygulama ya da EAS imzalama anahtarları kullanılmaz ve test anahtarları diske yazılmaz.
 
-Ham `npm audit --omit=dev` hâlâ yayımlanmış 1.4.0 sürümünü etkilenmiş gösterir. `audit:production`, yalnız bütünlük ve davranış doğrulaması başarılı olduğunda bu kesin danışmanı ve bilinen Expo dolaylı zincirini yerel olarak azaltılmış sayar. Danışman kimliği/kaynağı/aralığı, kurulum yolları ve zincir ilişkileri denetlenir. Yeni danışman, farklı tüketici, eksik veya döngülü danışman zinciri ve herhangi bir kritik bulgu bu kapsamdan yararlanamaz. Metro/image-size için önceki ayrı geçici istisna genişletilmemiştir.
+Ham `npm audit --omit=dev` hâlâ yayımlanmış 1.4.0 sürümünü etkilenmiş gösterir. Önceki `audit:production` kararı, bütünlük ve mevcut davranış vakaları başarılı olduğunda bu kesin danışmanı ve bilinen Expo dolaylı zincirini yerel olarak azaltılmış sayıyordu. 11 Ekim yayın engeli artık bu sonuçtan yayın onayı çıkmasını önler. Danışman kimliği/kaynağı/aralığı, kurulum yolları ve zincir ilişkileri denetlenir. Yeni danışman, farklı tüketici, eksik veya döngülü danışman zinciri ve herhangi bir kritik bulgu bu kapsamdan yararlanamaz. Metro/image-size için önceki ayrı geçici istisna genişletilmemiştir.
 
 Yerel node-forge kararı **2 Kasım 2026 gününün sonunda UTC** sona erer. Bu tarihten sonra normal kurulum ve yayın denetimi durur. Süreyi uzatmak otomatik bir işlem değildir; upstream durumu ve regresyonlar tekrar incelenmelidir.
 

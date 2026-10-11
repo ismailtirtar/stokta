@@ -1,5 +1,9 @@
 # Stokdaş ilk kararlı yayın doğrulaması
 
+## Güncel bağımlılık yayın engeli — 11 Ekim 2026
+
+Node-forge yerel yamasının mevcut 60 vaka sonucu tam kodlama kapsamını kanıtlamaz. Açık kapsam boşluğu nedeniyle `audit:production` artık başarılı rapordan yayın güvencesi üretmez; `verify:release` ve bağlı yeni derleme/gönderim adımları durur. Bu yayın bekletmesi bir kriptografik düzeltme veya kanıtlanmış üretim saldırısı iddiası değildir. Mevcut yama ve 2 Kasım inceleme süresi korunur, dağıtılmış uygulama değişmez. Aşağıdaki geçmiş PASS kayıtları bu güncel engeli kaldırmaz. Kaldırma koşulları [node-forge belgesindedir](../security/node-forge-patch.md).
+
 Bu belge doğrulanmış sonuçları ve açık kapıları ayırır. Kaynak CI testleri gerçek Google Play lisans testlerinin yerine geçmez. Bir PR'ın taslak olması veya bir AAB'ın derlenmesi, canlı sürümün yayınlandığı anlamına gelmez.
 
 ## Doğrulanmış sonuçlar
@@ -88,7 +92,7 @@ Sonraki iki belge değişikliği runtime, test ve SQL içeriğini değiştirmez;
 | Kapı | Tamamlanma ölçütü |
 |---|---|
 | Kaynak bütünlüğü | Güncel main ile #17/#20/#21 ve gizlilik/silme düzeltmeleri birleştirilmeli; main'deki destek yönlendirmesi korunmalı; birleşik commit'in tüm CI kontrolleri geçmeli |
-| Bağımlılık güvenliği | Node-forge ve braces kontrollü yamalarıyla 3 Ekim yerel üretim denetimi ve tam verify:release PASS (179/179 test). Son HEAD CI da geçmeli; 59/10 dosya bütünlüğü ve 60 RSA/206 derinlik vakası her kurulum/yayında korunmalı. Yerel kararlar 2 Kasım sonunda dolar; resmî düzeltmelere geçiş ve önceki ayrı Metro/image-size istisnası takip edilmeli |
+| Bağımlılık güvenliği | **11 Ekim: node-forge kodlama kapsamı açık; yayın güvencesi engelli.** Aşağıdaki önceki sonuç güncel onay değildir. Node-forge ve braces kontrollü yamalarıyla 3 Ekim yerel üretim denetimi ve tam verify:release PASS (179/179 test). Son HEAD CI da geçmeli; 59/10 dosya bütünlüğü ve 60 RSA/206 derinlik vakası her kurulum/yayında korunmalı. Yerel kararlar 2 Kasım sonunda dolar; resmî düzeltmelere geçiş ve önceki ayrı Metro/image-size istisnası takip edilmeli |
 | Play Store üzerinden yeniden abonelik | Gerçek lisans testinde yeni tokenın eski değişmez sahibine bağlandığı, ACK aldığı ve doğru işletmenin erişiminin açıldığı gösterilmeli |
 | Ödeme başarısızlığı ve düzelmesi | Gerçek grace/hold/recovery testinde grace erişimi korunmalı, hold yazmayı kapatmalı, ACTIVE/ACK iyileşmesi erişimi açmalı |
 | Bekleyen satın alma iptali ve tekrar deneme | Gerçek Google testinde bekleyen/terk edilmiş token hak açmamalı; sonraki başarılı satın alma doğru hesaba bağlanmalı |
