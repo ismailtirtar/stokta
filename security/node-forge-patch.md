@@ -67,15 +67,17 @@ Her yama denetimi üç girişte, e=3/e=65537 ve geçici 2048 bit test anahtarlar
 | Expo sertifika/PEM/CSR/SHA-256 akışı | Gerçek Expo API'siyle başarılı; imza Node crypto ile doğrulandı, değişmiş mesaj reddedildi |
 | TypeScript / strict-unused / Edge Function tip kontrolleri | Üçü de başarılı |
 | `EXPO_OFFLINE=1 EXPO_NO_TELEMETRY=1 expo install --check` | Yerel SDK uyumluluk eşlemesi başarılı; güncel uzak sürüm listesi sorgulanmadı |
+| Kullanıcı izniyle çevrimiçi `expo install --check` | Başarılı: `Dependencies are up to date` |
+| Kullanıcı izniyle güncel production audit | Ham rapor 22 high / 0 critical; dört bilinen kök danışman. Kapsam/bütünlük denetimi geçti; yalnız mevcut yayın engeli exit 1 üretti |
 | Expo Android export ve source map | 674 Metro modülüyle Hermes çıktısı başarılı; source map'te Forge yok |
 
 Bozuk DigestInfo'lar test özel anahtarıyla imzalanır. Testler ayrıştırıcının ret davranışını gösterir; özel anahtar olmadan saldırı gösterimi değildir. Uygulama/EAS imzalama anahtarları kullanılmaz ve üretilen test özel anahtarları diske yazılmaz. Upstream test kaynakları resmî v1.4.0 etiketinden alınmış ve Git blob özetleriyle kontrol edilmiştir; bu tablo tam upstream test paketi iddiası değildir.
 
 ## Eksik yayın kanıtı ve istisnalar
 
-Güncel `npm audit --omit=dev --json` ve çevrimiçi Expo sürüm kontrolü bu çalışmada sonuçlanmadı. Otomatik onay incelemesi, özel projenin bağımlılık/proje meta verilerinin npm/Expo servislerine iletilmesi için açık izin bulunmadığı gerekçesiyle bu işlemleri reddetti. Audit sonucu temizmiş gibi yorumlanmaz. Çevrimdışı Expo kontrolü güncel uzak tavsiye listesinin yerini tutmaz.
+İlk çevrimiçi kontrol girişimleri, özel proje meta verisi paylaşımı için açık izin bulunmadığı gerekçesiyle otomatik onay incelemesinde reddedilmişti. Kullanıcı 11 Ekim'de npm/Expo paylaşımına açık izin verdi. Sonraki çevrimiçi Expo SDK kontrolü başarılıdır. Güncel `npm audit --omit=dev --json`, 22 high / 0 critical ve yalnız dört bilinen kök danışman (node-forge, braces ve iki image-size danışmanı) döndürdü; yeni danışman yoktur. Gerçek `audit:production` rapor/kapsam ve iki yama denetimini geçti; yalnız korunmuş node-forge yayın engeli nedeniyle exit 1 ile durdu. Ham rapor sıfır açık olarak sunulmaz.
 
-PR iş akışları bu çevrimiçi kontrolleri otomatik çalıştırdığından, gerekli izin alınana kadar düzeltme yalnız ayrı geliştirme dalına kaydedilir; PR/CI bu reddi dolaylı biçimde aşmak için başlatılmaz. Yeni imzalı Android AAB, cihaz/emülatör smoke testi ve Play kanal doğrulaması da eksiktir. Mevcut yayın engelinin başarısız olması beklenen politika davranışıdır; yerel testlerin geçmesi `verify:release` onayı değildir.
+Verilen izin PR iş akışlarındaki aynı çevrimiçi kontrolleri de kapsar. Düzeltmenin CI doğrulaması ilerletilebilir; engeli kaldırma ayrı değişikliktir. Yeni imzalı Android AAB, cihaz/emülatör smoke testi ve Play kanal doğrulaması henüz eksiktir. Bu dalda yayın engelinin başarısız olması beklenen politika davranışıdır; yerel testlerin geçmesi `verify:release` onayı değildir.
 
 Ham audit yayımlanmış 1.4.0 sürümünü değerlendirmeye devam eder; yerel patch onun sürüm etiketini değiştirmez. Audit kodundaki node-forge danışman/graph kapsamı ile Metro/image-size geçici istisnası bu değişiklikte genişletilmemiştir. Geçici istisnaların kaldırılması veya yeniden değerlendirilmesi, yayın engelini kaldıran ayrı incelemenin parçası olmalıdır.
 
