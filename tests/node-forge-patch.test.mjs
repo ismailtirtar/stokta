@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { verifyNodeForgePatch } from "../scripts/node-forge-patch.mjs";
-import { signatureProbeResults } from "../scripts/node-forge-probes.mjs";
+import { encodingGapNames, signatureProbeCaseCount, signatureProbeResults } from "../scripts/node-forge-probes.mjs";
 import { nodeForgeFixture, patchPolicy, projectRoot, restoreOriginal } from "./helpers/node-forge-fixture.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -24,9 +24,9 @@ const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("h
 
 test("Yamasız paket kaynak ve iki tarayıcı girişinde açığı tekrar gösterir", () => withFixture(({ packageRoot }) => {
   const results = signatureProbeResults(packageRoot);
-  assert.equal(results.length, 60);
+  assert.equal(results.length, signatureProbeCaseCount);
   for (const result of results) {
-    const vulnerable = ["extra nested OCTET STRING", "unexpected nested parameter", "duplicate nested NULL"].includes(result.name);
+    const vulnerable = [...encodingGapNames, "extra nested OCTET STRING", "unexpected nested parameter", "duplicate nested NULL"].includes(result.name);
     assert.equal(result.accepted, vulnerable ? true : result.expected, JSON.stringify(result));
   }
 }, { original: true }));
@@ -34,12 +34,31 @@ test("Yamasız paket kaynak ve iki tarayıcı girişinde açığı tekrar göste
 test("Temiz kaynak yaması uygulanır, gerçek imzalar doğrulanır ve ikinci uygulama değişiklik yapmaz", () => withFixture(({ root, packageRoot }) => {
   assert.throws(() => verifyNodeForgePatch({ root }), /unapplied patch/);
   const first = verifyNodeForgePatch({ root, apply: true });
-  assert.equal(first.cases, 60);
+  assert.equal(first.cases, signatureProbeCaseCount);
   assert.equal(first.fileCount, 59);
   const before = Object.keys(patchPolicy.replacements).map((file) => hash(join(packageRoot, file)));
-  assert.equal(verifyNodeForgePatch({ root, apply: true }).cases, 60);
+  assert.equal(verifyNodeForgePatch({ root, apply: true }).cases, signatureProbeCaseCount);
   assert.deepEqual(Object.keys(patchPolicy.replacements).map((file) => hash(join(packageRoot, file))), before);
 }, { original: true }));
+
+// If a future reviewed manifest matches bytes that accidentally omit either
+// check, the behavior probes must still close the release gate.
+for (const file of Object.keys(patchPolicy.replacements)) {
+  for (const check of ["NULL", "DER length"]) {
+    test(`Davranış kontrolü hash güncellense de eksik ${check} denetimini yakalar: ${file}`, () => withFixture(({ root, packageRoot }) => {
+      const path = join(packageRoot, file);
+      const source = readFileSync(path, "utf8");
+      const removed = file === "lib/rsa.js" ?
+        (check === "NULL" ? "            (('parameters' in capture) && capture.parameters !== '') ||\n" : " ||\n            asn1.toDer(obj).getBytes() !== d.substr(0,\n              options._parseAllDigestBytes ? d.length : asn1.toDer(obj).length())") :
+        (check === "NULL" ? '||("parameters"in o&&""!==o.parameters)' : `||s.toDer(${file === "dist/forge.min.js" ? "n" : "a"}).getBytes()!==t.substr(0,i._parseAllDigestBytes?t.length:s.toDer(${file === "dist/forge.min.js" ? "n" : "a"}).length())`);
+      assert.equal(source.split(removed).length, 2);
+      writeFileSync(path, source.replace(removed, ""));
+      editJson(root, "security/node-forge-patch.json", (policy) => { policy.files[file].patched = hash(path); });
+      const scenario = check === "NULL" ? "NULL with one content octet" : "DigestInfo long-form short length";
+      assert.throws(() => verifyNodeForgePatch({ root }), (error) => error.message.includes("node-forge signature check failed") && error.message.includes(scenario));
+    }));
+  }
+}
 
 for (const file of Object.keys(patchPolicy.replacements)) {
   test(`Tek bir yamalı girişin geri alınması kontrolü kapatır: ${file}`, () => withFixture(({ root, packageRoot }) => {

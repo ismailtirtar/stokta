@@ -1,53 +1,92 @@
 # node-forge 1.4.0 yerel güvenlik yaması
 
-## Güncel yayın engeli — 11 Ekim 2026
+## Durum — 11 Ekim 2026
 
-Mevcut 60 vakanın geçmesi bozuk kodlamaların tamamının reddedildiğini veya ilgili güvenlik açığının tümüyle giderildiğini kanıtlamaz. Kodlama kapsamı açık kaldığı için yayın güvencesi bekletilir. Üretim yolunda erişilebilirlik veya gerçek imza sahteciliği kanıtlanmış değildir; bu belgedeki önceki sonuçlar yalnız belirtilen vaka kapsamına aittir.
+İç `DigestAlgorithm` eleman sayımına ek olarak, içerik taşıyan NULL parametresi ve standart dışı DER uzunluk kodlamalarının kabulü yeniden üretildi ve aşağıdaki dar kapsamlı yama ile giderildi. Eski yama yeni kodlama vakalarının 84/84'ünü varsayılan doğrulamada kabul ediyordu. Yeni yama bunları ana kaynakta ve iki dağıtım bundle'ında reddeder. Bu sonuç, bütün kriptografik uygulamanın güvenli olduğunun veya özel anahtar olmadan imza sahteciliğinin kanıtı değildir.
 
-`audit:production` mevcut rapor/bütünlük kontrollerini korur, fakat hem temiz rapor hem koşullu azaltım başarı yolunda açık hata ile durur. `verify:release`, ona bağlı CI doğrulaması, yeni Android/Play derlemesi ve EAS yayın ön kontrolü bu engeli devralır. Ham `npm audit --omit=dev --json` tanı için kullanılabilir; yayın onayı vermez. Mevcut kurulum yaması, hash'ler, sürüm, tüketiciler ve 2 Kasım inceleme tarihi değiştirilmez. Dağıtılmış uygulama etkilenmez.
+**Yayın engeli korunur.** Bu değişiklik güvenlik davranışını ve kanıtı günceller; yayın onayı vermez. `audit:production` temiz rapor ve koşullu azaltım yollarında açık hata ile durmaya devam eder. `verify:release`, ilgili CI, yeni Android/Play derlemesi ve EAS yayın ön kontrolü bu engeli devralır. Engelin kaldırılması, güncel commit'in yayın kontrolleri tamamlandıktan sonra ayrı bir değişiklik olmalıdır. Sürüm sabitlemesi, tüketiciler, lockfile, audit istisnaları ve 2 Kasım inceleme tarihi değiştirilmemiştir.
 
-Engel zamanla kendiliğinden kalkmaz ve ortam değişkeniyle atlanamaz. Kaldırılması; kapsam boşluğunu ele alan, kaynak/bağımlılık ve tüketici etkisi incelenmiş ayrı bir düzeltme, açık doğrulama sınırları ve güncel commit için yayın kanıtıyla gözden geçirilmelidir. Yeni bir upstream önerisi yalnız var olduğu için uygulanmaz. Aşağıdaki yama açıklaması tarihsel ve sınırlı kapsamı belgeler; güncel yayın izni değildir.
+11 Ekim kontrolünde npm'in güncel node-forge sürümü 1.4.0'dır; [GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv) yamalı sürüm belirtmez ve [upstream PR #1152](https://github.com/digitalbazaar/forge/pull/1152) açık durumdadır. Bu çalışma resmî veya birleştirilmiş upstream düzeltmesi değildir.
 
-GHSA-86w9-cpqp-85rv, RSA PKCS#1 v1.5 doğrulamasının nested `DigestAlgorithm` SEQUENCE içindeki fazladan elemanları kabul etmesidir. node-forge 1.4.0 dış `DigestInfo` uzunluğunu kontrol ederken bu iç yapıyı kontrol etmez. 2 Ekim 2026 kontrolünde npm'in güncel sürümü 1.4.0, resmî danışmanda yamalı sürüm yok ve upstream PR #1152 henüz açık durumdadır. Yerel yama resmî bir node-forge sürümü veya upstream tarafından birleştirilmiş düzeltme olarak sunulmaz.
+## İncelenen Android paketi ve kullanım kapsamı
 
-Yama, iç yapının eleman sayısını OID ve isteğe bağlı parametre sayısıyla sınırlar; bu tek başına tüm kodlama kurallarını doğrulamaz. `lib/rsa.js` son içeriği upstream önerisinin `ceba34402e329f0365134f23fe19898756527d65` commit'indeki dosyayla bayt bazında aynıdır. Aynı koşul, npm paketinde ayrıca dağıtılan `dist/forge.min.js` ve `dist/forge.all.min.js` dosyalarına da uygulanır; bundle'lar yeniden derlenmez. Sürüm etiketi 1.4.0 olarak kalır, alternatif registry veya fork kullanılmaz.
+[Android iş akışı 37739716103](https://github.com/ismailtirtar/stokta/actions/runs/37739716103) içindeki `stokdas-1.3.4-33-android-aab` artefaktı indirildi. ZIP, AAB, EAS build kaydı ve `release-provenance.json` birbirleriyle eşleştirildi.
 
-## Kaynak ve kurulum
+| Alan | Doğrulanan değer |
+| --- | --- |
+| GitHub artefakt kimliği | `11533283686` |
+| EAS build kimliği | `8c0c580e-a802-4253-89f7-50df06da1d4e` |
+| Kaynak commit | `ba1e5e52dd28b31edbffbb1ecb386ae55c708625` |
+| EAS sonuç / profil / SDK | `FINISHED` / `production` / `54.0.0` |
+| AAB manifesti | `com.ismailtirtar.stokta`, sürüm `1.3.4`, versionCode `33` |
+| ZIP SHA-256 | `70511ba059e9692bb0b9d90e2cc7663ee2d9f83d9f4e247806bfe87183e6b4aa` |
+| AAB SHA-256 | `28adaee8ba93527b94c6601973a843a03dda1db5556444df4f34df5ff484e156` |
 
-`security/node-forge-patch.json` sürümü, registry URL'sini, SHA-512 tarball bütünlüğünü, kurulum/tüketici yollarını, üç kesin metin değişikliğini ve paketin 59 dosyasının SHA-256 özetlerini içerir. Başlangıç envanteri resmî npm tarball'ının SHA-512 bütünlüğü doğrulandıktan ve kurulu paketle bütün dosyaları eşleştirildikten sonra oluşturuldu. Değişen dosyalarda hem özgün hem yamalı SHA-256 bulunur.
+AAB'nin protobuf Android manifesti doğrudan çözüldü. JAR manifestindeki 767 imzalı içerik girdisinin SHA-256 özetleri, `.SF` manifest özeti ve `.RSA` CMS imzası doğrulandı. Yükleme sertifikasının SHA-256 parmak izi `62:31:49:46:50:E3:58:44:E3:A2:F4:C2:BA:98:0D:44:25:66:26:EF:0B:1D:B8:C8:86:8E:3B:7A:98:8C:1F:87`'dir. CMS doğrulaması sertifika güven zincirini veya Play App Signing sertifikasını doğrulamaz.
 
-`package.json` node-forge sürümünü tam `1.4.0` override'ıyla sabitler. `npm ci` ve `npm install`, `postinstall` içinde `scripts/node-forge-patch.mjs` çalıştırır. Betik önce bütün envanteri ve kilidi kontrol eder, yalnız bilinen özgün dosyaları yamalar ve ikinci çalıştırmada aynı içeriği korur. Bilinmeyen içerik otomatik onarılmaz. Başka dosya değişiklikleri, eksik/ek dosya, sembolik bağlantı, yeni paket kaynağı/sürümü veya tüketici grafiği reddedilir.
+Paketteki `base/assets/index.android.bundle`, Hermes bytecode sürümü 96 olarak ayrıştırıldı: 10.603 fonksiyon, 11.409 string ve 496 fonksiyon kaynak girdisi. Bytecode string/fonksiyon dökümünde `DigestInfo`, `algorithmIdentifier`, `node-forge`, `forge.pki`, `generateSelfSignedCodeSigningCertificate`, `modInverse` ve `asn1` işaretleri bulunmadı. AAB'nin 770 ZIP girdisinin ham taraması da bu işaretleri göstermedi. Tek DEX ve 60 yerel `.so` girdisi bu arşiv taramasına dahildir; bu işlem tam yerel kod tersine mühendisliği değildir.
 
-Kurulu `@expo/code-signing-certificates` 0.0.6 ve Expo içindeki `@expo/cli` 54.0.27, `createRequire(...).resolve(...)` ile gerçekten çözdükleri node-forge kopyasına kadar denetlenir. Kilitte belirtilmeyen iç içe bir kopya da bu tüketicilerden biri ona çözülürse reddedilir. Her bağımlılık değişikliği bu sabit kapsamın yeniden incelenmesini gerektirir.
+Kaynak ve lockfile incelemesi node-forge'un yalnız `@expo/code-signing-certificates` 0.0.6 ve Expo içindeki `@expo/cli` 54.0.27 tarafından çözüldüğünü gösterir. Uygulama kaynaklarında doğrudan node-forge import'u, yapılandırmada `expo-updates` veya code signing ayarı yoktur. İncelemenin tabanı `ca0cc784569a0cf26a638589821966ccbd7682f4` ile AAB kaynak commit'i arasında uygulama kodu/lockfile değişmemiş; yayın engeli, test ve belge değişiklikleri vardır. Yerel Android export'unun 673 source-map kaynağında da node-forge ve `@expo/code-signing-certificates` yoktur. Bu kanıtlar, incelenen sürümde Forge'un Expo geliştirme/build araçlarında kaldığı sonucunu destekler.
 
-## Yayın kontrolü
+Bu, imzalı EAS AAB 33 incelemesidir. Google'ın ürettiği APK, Play Console'daki güncel üretim kanalı/inceleme durumu ve cihazdaki kurulum bu çalışma kapsamında doğrulanmadı. Yerel Hermes export'u AAB 33 ile bayt bazında eşleşmez; yeniden üretilebilir derleme kanıtı olarak sunulmaz. GitHub artefaktının mevcut son kullanma tarihi 7 Kasım 2026'dır.
 
-```bash
-npm ci
-node scripts/node-forge-patch.mjs --check
-npm run verify:release
-```
+## Düzeltme ve kurulum
 
-`--check` ve audit kontrolü yamayı uygulamaz veya onarmaz. `npm ci --ignore-scripts` ile kurulmuş özgün paket denetimden geçemez. Audit kapısı, rapor temiz görünse bile yama doğrulamasını ister.
+İç eleman sayımı upstream önerisinin `ceba34402e329f0365134f23fe19898756527d65` commit'ine dayanır. İki ek kontrol yerel inceleme sonucudur; yeni `lib/rsa.js` upstream önerisiyle bayt bazında aynı değildir:
 
-Her doğrulamada ana kaynak ve iki tarayıcı girişinde, 2048 bitlik geçici test anahtarlarıyla hem e=3 hem e=65537 için toplam 60 gerçek RSA doğrulama vakası yürütülür:
+1. İsteğe bağlı ASN.1 NULL mevcutsa yakalanan içerik tam olarak boş olmalıdır.
+2. Ayrıştırılan `DigestInfo`, DER ile yeniden kodlanır ve imzadaki özgün baytlarla karşılaştırılır. Böylece gereksiz long-form, baştaki sıfır uzunluk okteti ve BER indefinite uzunlukları reddedilir. Varsayılan doğrulama tüm DigestInfo baytlarını karşılaştırır.
 
-- SHA-256 için NULL bulunan ve bulunmayan geçerli DigestInfo; SHA-384/SHA-512 imzaları; mevcut MD5 ayrıştırma uyumluluğu kabul edilir. MD5 testi yeni kriptografi seçimi önerisi değildir.
-- Ek nested OCTET STRING, beklenmeyen parametre, yinelenen NULL, ek dış eleman ve yanlış digest reddedilir.
-- Regresyon testlerinde özgün paketin üç nested bozuk yapıyı kabul ettiği ayrıca gösterilir; böylece testin yalnız başarılı imzaları kontrol etmediği kanıtlanır.
-- Expo'nun gerçek sertifika oluşturma/PEM dönüşümü/doğrulaması, CSR ve SHA-256 imzalama API'leri sınanır. Üretilen imza Node crypto ile bağımsız doğrulanır; değiştirilmiş mesaj reddedilir.
+Upstream'in test amaçlı `_parseAllDigestBytes: false` seçeneği için mevcut sonek toleransı korunur; bu seçenek ayrıştırılan bölümün DER önekiyle karşılaştırılmasını kullanır. İki yeni kontrol bu seçenekle de aktiftir. Boş NULL, SHA-384/SHA-512 ve mevcut SHA-256 parametresiz uyumluluk davranışı korunur. Node/OpenSSL parametresiz SHA-256 vakasını kabul etmediği için bu tek uyumluluk vakası bağımsız doğrulayıcıyla eşitlik iddiasına dahil değildir. MD5 vakası mevcut ayrıştırma uyumluluğunu sınar; yeni kriptografi tercihi önermez.
 
-Bu vakalarda bozuk encodings test özel anahtarıyla imzalanır. Testler ayrıştırıcının red davranışını kanıtlar; özel anahtar olmadan üretilmiş yeni bir saldırı gösterimi veya tüm kriptografik uygulamanın ispatı değildir. Uygulama ya da EAS imzalama anahtarları kullanılmaz ve test anahtarları diske yazılmaz.
+Kontroller yalnız RSA PKCS#1 v1.5 imza doğrulamasında uygulanır. Genel ASN.1 ayrıştırıcısı ve sertifika/CSR ayrıştırma kuralları değiştirilmez. Aynı koşullar `dist/forge.min.js` ve `dist/forge.all.min.js` içinde de uygulanır; bundle'lar yeniden derlenmez. Yerel değişikliklerin kuralları [RFC 8017, §9.2 ve Ek B.1](https://www.rfc-editor.org/rfc/rfc8017.html#section-9.2) ile karşılaştırıldı.
 
-Ham `npm audit --omit=dev` hâlâ yayımlanmış 1.4.0 sürümünü etkilenmiş gösterir. Önceki `audit:production` kararı, bütünlük ve mevcut davranış vakaları başarılı olduğunda bu kesin danışmanı ve bilinen Expo dolaylı zincirini yerel olarak azaltılmış sayıyordu. 11 Ekim yayın engeli artık bu sonuçtan yayın onayı çıkmasını önler. Danışman kimliği/kaynağı/aralığı, kurulum yolları ve zincir ilişkileri denetlenir. Yeni danışman, farklı tüketici, eksik veya döngülü danışman zinciri ve herhangi bir kritik bulgu bu kapsamdan yararlanamaz. Metro/image-size için önceki ayrı geçici istisna genişletilmemiştir.
+`security/node-forge-patch.json`, sürüm, registry URL'si, SHA-512 tarball bütünlüğü, tüketiciler, üç kesin metin değişikliği ve 59 paket dosyasının SHA-256 özetlerini içerir. Değişen üç dosyanın yamalı özetleri yenilenmiştir; özgün paket özetleri korunur. `upstreamCommit` eleman sayımının referansıdır; `localReview` ek kontrollerin yerel olduğunu belirtir.
 
-Yerel node-forge kararı **2 Kasım 2026 gününün sonunda UTC** sona erer. Bu tarihten sonra normal kurulum ve yayın denetimi durur. Süreyi uzatmak otomatik bir işlem değildir; upstream durumu ve regresyonlar tekrar incelenmelidir.
+`package.json` tam `1.4.0` override'ını korur. `npm ci`/`npm install`, `postinstall` içinde yama denetimini çalıştırır. Betik tüm envanteri ve kilidi kontrol eder; yalnız bilinen özgün dosyaları yamalar ve ikinci çalıştırmada aynı içeriği korur. Bilinmeyen içerik, eksik/ek dosya, sembolik bağlantı, kaynak/sürüm veya tüketici değişikliği reddedilir. Tüketicilerin gerçekten çözdüğü Forge kopyası `createRequire(...).resolve(...)` ile denetlenir; kilit dışında kalan iç içe kopya da reddedilir. `--check` yamayı uygulamaz veya onarmaz.
 
-## Resmî düzeltmeye geçiş
+## Davranış ve uyumluluk kanıtı
 
-1. Yayımlanan sürümün bu danışmanı ve iç eleman sayımı açığını gerçekten giderdiğini resmî danışman, sürüm ve kaynak üzerinden doğrula.
-2. Sabit sürümü/Expo bağımlılığını kontrollü güncelle; temiz kurulumda aynı RSA negatif/pozitif vakalarını ve Expo sertifika akışını yeni sürüm üzerinde çalıştır.
-3. Geçici `postinstall`, yama manifesti ve audit içindeki koşullu node-forge kapsamını kaldır. İmza regresyonlarını yeni sürüm için koru; Metro istisnasını ayrıca değerlendir.
-4. Tam `verify:release` ve güncel commit'in GitHub kontrolleri geçmeden yeni AAB üretme veya Play gönderimi yapma.
+Her yama denetimi üç girişte, e=3/e=65537 ve geçici 2048 bit test anahtarlarıyla **228 gerçek RSA vakası** yürütür: 30 kabul ve 198 ret. Bozuk uzunluklar bağımsız ham TLV kodlayıcısıyla hazırlanır; Forge serializer'ının bunları testten önce düzeltmesine izin verilmez.
 
-Kaynaklar: [resmî danışman](https://github.com/advisories/GHSA-86w9-cpqp-85rv), [upstream önerisi #1152](https://github.com/digitalbazaar/forge/pull/1152), [sabit upstream kaynak dosyası](https://github.com/digitalbazaar/forge/blob/ceba34402e329f0365134f23fe19898756527d65/lib/rsa.js).
+- Önceki 10 pozitif/negatif biçim korunur: geçerli digest'ler, iç/dış fazladan elemanlar, beklenmeyen parametre, yinelenen NULL ve yanlış digest.
+- 14 yeni bozuk biçim vardır: bir ve 16 oktet içerikli NULL; DigestInfo, DigestAlgorithm, OID, NULL ve digest alanlarının her biri için gereksiz long-form ve sıfırla başlayan uzunluk; iki SEQUENCE için indefinite uzunluk.
+- Yeni bozuk biçimler varsayılan seçenekle ve `_parseAllDigestBytes: false` ile sınanır. Eski yama her iki seçenek grubunun 84/84'ünü kabul eder; yeni yama 168/168'ini reddeder.
+- Parametresiz SHA-256 uyumluluğu dışında tüm sonuçlar Node/OpenSSL'in bağımsız doğrulamasıyla aynı olmalıdır. Beklenen ret yerine alakasız çalışma zamanı hatası oluşursa denetim başarısız olur.
+- Altı regresyon testi, NULL veya DER kontrolünü üç girişin her birinden tek tek çıkarır ve manifest hash'ini yeniden hesaplar. Böylece hash doğru olsa bile davranış denetiminin eksik güvenlik kontrolünü yakaladığı gösterilir.
+- Özgün 1.4.0 paketinin açıkları kabul ettiği, yamanın temiz kurulumda uygulandığı ve yeniden uygulamanın değişiklik yapmadığı ayrıca sınanır.
+
+11 Ekim'de Node 22.23.3 ile tamamlanan doğrulama:
+
+| Kontrol | Sonuç |
+| --- | --- |
+| Temiz `npm ci --no-audit --no-fund` | 721 paket; Forge 59 hash / 228 vaka ve mevcut braces denetimi başarılı |
+| `node scripts/node-forge-patch.mjs --check` | 59 hash ve 228 RSA vakası başarılı |
+| `node --test tests/*.test.mjs` | 196/196 geçti; önceki 190 teste altı güvenlik mutasyon testi eklendi |
+| Upstream v1.4.0 RSA/ASN.1/CSR/PKCS1/X509 testleri | 384 geçti, upstream'de tanımlı 4 test atlandı, 0 hata |
+| Expo sertifika/PEM/CSR/SHA-256 akışı | Gerçek Expo API'siyle başarılı; imza Node crypto ile doğrulandı, değişmiş mesaj reddedildi |
+| TypeScript / strict-unused / Edge Function tip kontrolleri | Üçü de başarılı |
+| `EXPO_OFFLINE=1 EXPO_NO_TELEMETRY=1 expo install --check` | Yerel SDK uyumluluk eşlemesi başarılı; güncel uzak sürüm listesi sorgulanmadı |
+| Expo Android export ve source map | 674 Metro modülüyle Hermes çıktısı başarılı; source map'te Forge yok |
+
+Bozuk DigestInfo'lar test özel anahtarıyla imzalanır. Testler ayrıştırıcının ret davranışını gösterir; özel anahtar olmadan saldırı gösterimi değildir. Uygulama/EAS imzalama anahtarları kullanılmaz ve üretilen test özel anahtarları diske yazılmaz. Upstream test kaynakları resmî v1.4.0 etiketinden alınmış ve Git blob özetleriyle kontrol edilmiştir; bu tablo tam upstream test paketi iddiası değildir.
+
+## Eksik yayın kanıtı ve istisnalar
+
+Güncel `npm audit --omit=dev --json` ve çevrimiçi Expo sürüm kontrolü bu çalışmada sonuçlanmadı. Otomatik onay incelemesi, özel projenin bağımlılık/proje meta verilerinin npm/Expo servislerine iletilmesi için açık izin bulunmadığı gerekçesiyle bu işlemleri reddetti. Audit sonucu temizmiş gibi yorumlanmaz. Çevrimdışı Expo kontrolü güncel uzak tavsiye listesinin yerini tutmaz.
+
+PR iş akışları bu çevrimiçi kontrolleri otomatik çalıştırdığından, gerekli izin alınana kadar düzeltme yalnız ayrı geliştirme dalına kaydedilir; PR/CI bu reddi dolaylı biçimde aşmak için başlatılmaz. Yeni imzalı Android AAB, cihaz/emülatör smoke testi ve Play kanal doğrulaması da eksiktir. Mevcut yayın engelinin başarısız olması beklenen politika davranışıdır; yerel testlerin geçmesi `verify:release` onayı değildir.
+
+Ham audit yayımlanmış 1.4.0 sürümünü değerlendirmeye devam eder; yerel patch onun sürüm etiketini değiştirmez. Audit kodundaki node-forge danışman/graph kapsamı ile Metro/image-size geçici istisnası bu değişiklikte genişletilmemiştir. Geçici istisnaların kaldırılması veya yeniden değerlendirilmesi, yayın engelini kaldıran ayrı incelemenin parçası olmalıdır.
+
+Yerel yama kararı **2 Kasım 2026 gününün sonunda UTC** sona erer. Süre dolunca kurulum ve denetim durur. Tarih otomatik uzatılmaz; upstream durumu ve regresyonlar tekrar incelenmelidir.
+
+## Resmî düzeltmeye ve yayına geçiş
+
+1. Resmî sürüm/danışman/kaynak üzerinden iç eleman sayımının, içerikli NULL'un ve standart dışı uzunlukların gerçekten giderildiğini doğrula; yalnız PR varlığını yeterli sayma.
+2. Expo ile uyumlu sürümü kontrollü güncelle ve temiz kurulumda aynı pozitif/negatif RSA vakalarını, upstream regresyonlarını ve Expo akışını çalıştır.
+3. Geçici postinstall/manifest ve node-forge audit kapsamını kaldırırken imza regresyonlarını koru; Metro istisnasını ayrıca değerlendir.
+4. İzinli güncel audit/Expo ve commit CI kanıtını tamamla. Yayın engelini ayrı değişiklikle kaldır; ardından güncel commit'in tam `verify:release` kontrolü, imzalı Android derlemesi ve smoke testi başarılı olsun.
+5. Yeni versionCode ile Türkiye üretim sürümünü hazırla ve Google incelemesine gönder; gönderim ve inceleme sonucu ayrı doğrulansın.
+
+Kaynaklar: [resmî danışman](https://github.com/advisories/GHSA-86w9-cpqp-85rv), [upstream önerisi #1152](https://github.com/digitalbazaar/forge/pull/1152), [eleman sayımı için sabit upstream kaynak](https://github.com/digitalbazaar/forge/blob/ceba34402e329f0365134f23fe19898756527d65/lib/rsa.js), [RFC 8017](https://www.rfc-editor.org/rfc/rfc8017.html), [incelenen Android artefaktının iş akışı](https://github.com/ismailtirtar/stokta/actions/runs/37739716103).
