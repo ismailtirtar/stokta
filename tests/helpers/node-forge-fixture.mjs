@@ -19,7 +19,7 @@ export function nodeForgeFixture({ original = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "stokdas-forge-"));
   for (const file of [
     "package.json", "package-lock.json", "security/node-forge-patch.json", "security/braces-patch.json", "security/npm-audit-allowlist.json",
-    "scripts/node-forge-patch.mjs", "scripts/node-forge-probes.mjs", "scripts/braces-patch.mjs", "scripts/braces-probes.mjs", "scripts/verify-npm-audit.mjs",
+    "scripts/node-forge-release-assurance.mjs", "scripts/node-forge-patch.mjs", "scripts/node-forge-probes.mjs", "scripts/braces-patch.mjs", "scripts/braces-probes.mjs", "scripts/verify-npm-audit.mjs",
     ...Object.keys(patchPolicy.consumers).map((path) => `${path}/package.json`),
     ...["@jest/transform", "jest-haste-map", "jest-message-util", "metro-file-map"].map((name) => `node_modules/${name}/package.json`),
   ]) {
