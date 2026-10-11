@@ -1,8 +1,37 @@
-import { createHash, generateKeyPairSync, constants, privateEncrypt } from "node:crypto";
+import { createHash, generateKeyPairSync, constants, privateEncrypt, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, sep } from "node:path";
 import { runInNewContext } from "node:vm";
+
+// Encode these short DigestInfo fields independently of forge's serializer.
+// Nonminimal lengths must survive into the RSA block instead of being silently
+// normalized by asn1.toDer. Parent lengths include the malformed child bytes.
+function encodedDigestInfo(digest, { field, form = "short", nullContent = "" } = {}) {
+  const tlv = (name, tag, value) => {
+    const content = Buffer.isBuffer(value) ? value : Buffer.from(value, "binary");
+    if (content.length >= 128) throw new Error("Probe field is not short-form sized");
+    const chosen = name === field ? form : "short";
+    if (chosen === "indefinite") {
+      return Buffer.concat([Buffer.from([tag, 0x80]), content, Buffer.from([0, 0])]);
+    }
+    const length = chosen === "long" ? [0x81, content.length] :
+      chosen === "leading-zero" ? [0x82, 0, content.length] : [content.length];
+    return Buffer.concat([Buffer.from([tag, ...length]), content]);
+  };
+  const oid = tlv("OID", 0x06, Buffer.from("608648016503040201", "hex")); // SHA-256
+  const parameters = tlv("NULL", 0x05, nullContent);
+  const algorithm = tlv("DigestAlgorithm", 0x30, Buffer.concat([oid, parameters]));
+  return tlv("DigestInfo", 0x30, Buffer.concat([algorithm, tlv("digest", 0x04, digest)]));
+}
+
+export const encodingGapNames = [
+  "NULL with one content octet", "NULL with sixteen content octets",
+  ...["DigestInfo", "DigestAlgorithm", "OID", "NULL", "digest"].flatMap((field) =>
+    [`${field} long-form short length`, `${field} leading-zero length`]),
+  "DigestInfo indefinite length", "DigestAlgorithm indefinite length",
+];
+export const signatureProbeCaseCount = 228;
 
 // These keys are generated only for parser regression tests. No application or
 // signing credentials are loaded. Malformed encodings are signed with the test
@@ -38,7 +67,7 @@ export function signatureProbeResults(packageRoot) {
       const publicKey = forge.pki.publicKeyFromPem(publicPem);
       const a = forge.asn1;
       const node = (type, value, constructed = false) => a.create(a.Class.UNIVERSAL, type, constructed, value);
-      for (const [name, algorithm, parameter, extra, outerExtra, wrongDigest, expected] of [
+      const cases = [
         ["SHA-256 with NULL", "sha256", "null", false, false, false, true],
         ["SHA-256 without parameters", "sha256", "absent", false, false, false, true],
         ["SHA-384 with NULL", "sha384", "null", false, false, false, true],
@@ -49,7 +78,9 @@ export function signatureProbeResults(packageRoot) {
         ["duplicate nested NULL", "sha256", "duplicate", false, false, false, false],
         ["extra outer child", "sha256", "null", false, true, false, false],
         ["wrong digest", "sha256", "null", false, false, true, false],
-      ]) {
+      ];
+      for (const name of encodingGapNames) cases.push([name, "sha256", "null", false, false, false, false]);
+      for (const [name, algorithm, parameter, extra, outerExtra, wrongDigest, expected] of cases) {
         const digest = createHash(algorithm).update(message).digest();
         const children = [node(a.Type.OID, a.oidToDer(forge.oids[algorithm]).getBytes())];
         if (parameter === "null" || parameter === "duplicate") children.push(node(a.Type.NULL, ""));
@@ -59,19 +90,32 @@ export function signatureProbeResults(packageRoot) {
         if (wrongDigest) encodedDigest[0] ^= 1;
         const outer = [node(a.Type.SEQUENCE, children, true), node(a.Type.OCTETSTRING, encodedDigest.toString("binary"))];
         if (outerExtra) outer.push(node(a.Type.NULL, ""));
-        const der = Buffer.from(a.toDer(node(a.Type.SEQUENCE, outer, true)).getBytes(), "binary");
+        let der = Buffer.from(a.toDer(node(a.Type.SEQUENCE, outer, true)).getBytes(), "binary");
+        if (encodingGapNames.includes(name)) {
+          const field = ["DigestInfo", "DigestAlgorithm", "OID", "NULL", "digest"].find((field) => name.startsWith(`${field} `));
+          const form = name.includes("leading-zero") ? "leading-zero" :
+            name.includes("long-form") ? "long" : name.includes("indefinite") ? "indefinite" : "short";
+          const nullContent = name === "NULL with one content octet" ? "\x00" :
+            name === "NULL with sixteen content octets" ? "unchecked bytes!" : "";
+          der = encodedDigestInfo(digest, { field, form, nullContent });
+        }
         const encoded = Buffer.concat([Buffer.from([0, 1]), Buffer.alloc(256 - der.length - 3, 0xff), Buffer.from([0]), der]);
         const signature = privateEncrypt({ key: pair.privateKey, padding: constants.RSA_NO_PADDING }, encoded);
-        let accepted;
-        try {
-          accepted = publicKey.verify(digest.toString("binary"), signature.toString("binary"));
-        } catch (error) {
-          // Only the intended DigestInfo validation exception is a valid
-          // rejection; unrelated runtime errors must stop verification.
-          if (!error.message?.includes("valid RSASSA-PKCS1-v1_5 DigestInfo")) throw error;
-          accepted = false;
+        const opensslAccepted = verify(algorithm, message, pair.publicKey, signature);
+        for (const parseAllDigestBytes of encodingGapNames.includes(name) ? [true, false] : [true]) {
+          let accepted;
+          try {
+            accepted = publicKey.verify(digest.toString("binary"), signature.toString("binary"), undefined, {
+              _parseAllDigestBytes: parseAllDigestBytes,
+            });
+          } catch (error) {
+            // Only the intended DigestInfo validation exception is a valid
+            // rejection; unrelated runtime errors must stop verification.
+            if (!error.message?.includes("valid RSASSA-PKCS1-v1_5 DigestInfo")) throw error;
+            accepted = false;
+          }
+          results.push({ entrypoint, exponent, name, parseAllDigestBytes, accepted, expected, opensslAccepted });
         }
-        results.push({ entrypoint, exponent, name, accepted, expected });
       }
     }
   }

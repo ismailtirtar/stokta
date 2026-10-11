@@ -4,7 +4,7 @@ import { lstatSync, readdirSync, readFileSync, realpathSync, writeFileSync } fro
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { signatureProbeResults } from "./node-forge-probes.mjs";
+import { signatureProbeCaseCount, signatureProbeResults } from "./node-forge-probes.mjs";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const json = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -91,9 +91,14 @@ export function verifyNodeForgePatch({ root = projectRoot, apply = false, now = 
   let cases = 0;
   for (const path of paths) {
     const results = signatureProbeResults(join(root, path));
-    assert.equal(results.length, 60, "node-forge signature probes are incomplete");
+    assert.equal(results.length, signatureProbeCaseCount, "node-forge signature probes are incomplete");
     for (const result of results) {
       assert.equal(result.accepted, result.expected, `node-forge signature check failed: ${result.entrypoint}, e=${result.exponent}, ${result.name}`);
+      // Retain forge's existing absent-parameters compatibility explicitly.
+      // Every other positive/negative case must also match Node/OpenSSL.
+      if (result.name !== "SHA-256 without parameters") {
+        assert.equal(result.opensslAccepted, result.expected, `independent RSA oracle mismatch: ${result.name}`);
+      }
     }
     cases += results.length;
   }

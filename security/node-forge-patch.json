@@ -30,15 +30,15 @@
   "replacements": {
     "lib/rsa.js": {
       "before": "          // validate DigestInfo structure and element count\n          var capture = {};\n          var errors = [];\n          if(!asn1.validate(obj, digestInfoValidator, capture, errors) ||\n            obj.value.length !== 2) {",
-      "after": "          // validate DigestInfo structure and element counts (outer DigestInfo\n          // and nested DigestAlgorithm). asn1.validate ignores extra children,\n          // so length must be checked explicitly at each nesting level to\n          // prevent low-exponent PKCS#1 v1.5 signature forgery (CVE-2026-85393).\n          var capture = {};\n          var errors = [];\n          if(!asn1.validate(obj, digestInfoValidator, capture, errors) ||\n            obj.value.length !== 2 ||\n            obj.value[0].value.length !==\n              (('parameters' in capture) ? 2 : 1)) {"
+      "after": "          // Validate both element counts and the optional NULL value. Compare\n          // the complete DigestInfo with its DER serialization to reject BER\n          // indefinite lengths and nonminimal length octets at every level.\n          // These checks apply only to RSA PKCS#1 v1.5 signature verification.\n          var capture = {};\n          var errors = [];\n          if(!asn1.validate(obj, digestInfoValidator, capture, errors) ||\n            obj.value.length !== 2 ||\n            obj.value[0].value.length !==\n              (('parameters' in capture) ? 2 : 1) ||\n            (('parameters' in capture) && capture.parameters !== '') ||\n            asn1.toDer(obj).getBytes() !== d.substr(0,\n              options._parseAllDigestBytes ? d.length : asn1.toDer(obj).length())) {"
     },
     "dist/forge.min.js": {
       "before": "!s.validate(n,d,o,c)||2!==n.value.length",
-      "after": "!s.validate(n,d,o,c)||2!==n.value.length||n.value[0].value.length!==(\"parameters\"in o?2:1)"
+      "after": "!s.validate(n,d,o,c)||2!==n.value.length||n.value[0].value.length!==(\"parameters\"in o?2:1)||(\"parameters\"in o&&\"\"!==o.parameters)||s.toDer(n).getBytes()!==t.substr(0,i._parseAllDigestBytes?t.length:s.toDer(n).length())"
     },
     "dist/forge.all.min.js": {
       "before": "!s.validate(a,d,o,c)||2!==a.value.length",
-      "after": "!s.validate(a,d,o,c)||2!==a.value.length||a.value[0].value.length!==(\"parameters\"in o?2:1)"
+      "after": "!s.validate(a,d,o,c)||2!==a.value.length||a.value[0].value.length!==(\"parameters\"in o?2:1)||(\"parameters\"in o&&\"\"!==o.parameters)||s.toDer(a).getBytes()!==t.substr(0,i._parseAllDigestBytes?t.length:s.toDer(a).length())"
     }
   },
   "files": {
@@ -50,14 +50,14 @@
     },
     "dist/forge.all.min.js": {
       "original": "cb9ba4045a81825f8edb646c38d53a1ac30ce07665bf26042c8dea86d7208642",
-      "patched": "baaad7f257463658489c2860eb83da1ab6bf6485557a94a8a5a97f935784a1bb"
+      "patched": "eb0cb7379da63d8c0109e672c005ed5131f48e0c37c752a9354d7cd2c41ff049"
     },
     "dist/forge.all.min.js.map": {
       "original": "0b21eb8fb1c124e963d564b6462177331027f6e739f48e73184e0f6a81cac3f1"
     },
     "dist/forge.min.js": {
       "original": "d9b9074e6861200d676e25dcfe97889db5e8f4150bb766d29c491ad709a51b58",
-      "patched": "a1d374dddbfd38635e74c08bddcd55553f9b3e29fa4346ff8ac8cbfa2f21414f"
+      "patched": "ec182668b149cd542ee1e22905b6390d1682f9d3d295f7276ba1e0a0e80a26bd"
     },
     "dist/forge.min.js.map": {
       "original": "5f11be794b0ad083ce9b2bcee1079e7ee1f0771d37beb90d6f13b2b9a8a0eba3"
@@ -187,7 +187,7 @@
     },
     "lib/rsa.js": {
       "original": "fd4740238145ec26470eb3f06a627c72039538ce1307dbdce40521f94dfd0a50",
-      "patched": "acc22e5d36e27832c34e02dd3933aad7977d45b047eead5016520735efedc9c5"
+      "patched": "4e0a232caaedfe052b73a59d381f5e6f331fa55bc60f7121b9dcc404976dcc1a"
     },
     "lib/sha1.js": {
       "original": "0792cc13fa342fd9d8c213c4ffd0d697fc019144258e383dd0ac985bd717564c"
@@ -222,5 +222,6 @@
     "package.json": {
       "original": "a907bca8a62d97478062f2bd8ed5cd47d00b79385d3f08a8cad1c3bd7e3eb5bf"
     }
-  }
+  },
+  "localReview": "2026-10-11: empty NULL contents and canonical DER lengths; upstream reference covers element counts only"
 }
